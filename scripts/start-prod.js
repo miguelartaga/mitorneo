@@ -10,18 +10,6 @@ if (!databaseUrl) {
   process.exit(1);
 }
 
-// 2) (Opcional) sincronizar schema con la DB antes de arrancar
-//    Si prefieres migraciones reales en prod, cambia esto a: `npx prisma migrate deploy`
-const migrateResult = spawnSync(
-  "npx",
-  ["prisma", "db", "push", "--skip-generate"],
-  { stdio: "inherit" }
-);
-
-if (migrateResult.status !== 0) {
-  process.exit(migrateResult.status ?? 1);
-}
-
 // 3) Config host/port para Render
 const port = process.env.PORT || "3000";
 const hostname = "0.0.0.0";
