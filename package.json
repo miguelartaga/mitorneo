@@ -10,9 +10,9 @@
     "postinstall": "prisma generate",
     "migrate:deploy": "prisma migrate deploy",
     "prisma:generate": "prisma generate",
-    "db:setup": "prisma db push && node prisma/seed.js",
-    "db:seed": "node prisma/seed.js",
-    "db:seed:test": "node prisma/seed-players-categories.js"
+    "db:setup": "echo \"❌ db:setup disabled in production\"",
+    "db:seed": "echo \"❌ db:seed disabled in production\"",
+    "db:seed:test": "echo \"❌ db:seed:test disabled in production\""
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4",
