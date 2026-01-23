@@ -62,6 +62,7 @@ export const metadata: Metadata = {
 };
 
 import Footer from "@/components/layout/footer";
+import ScrollControls from "@/components/ui/scroll-controls";
 
 export default async function RootLayout({
   children,
@@ -80,6 +81,7 @@ export default async function RootLayout({
           <HeaderBar />
           <div className="flex min-h-screen flex-col">
             <div className="flex-1">{children}</div>
+            <ScrollControls />
             <Footer />
           </div>
         </Providers>

@@ -89,11 +89,16 @@ async function main() {
   console.log("Seeded categories and players.");
 }
 
-main()
-  .catch((error) => {
-    console.error("Seed error:", error);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+if (require.main === module) {
+  main()
+    .catch((error) => {
+      console.error("Seed error:", error);
+      process.exit(1);
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+} else {
+  // If imported, just export main (optional)
+  module.exports = { main };
+}

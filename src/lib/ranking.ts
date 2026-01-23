@@ -57,7 +57,7 @@ type Tiebreaker =
   | "POINTS_PER_MATCH"
   | "POINTS_DIFF";
 
-type StandingEntry = {
+export type StandingEntry = {
   id: string;
   categoryId: string;
   groupName: string;
@@ -86,8 +86,8 @@ const playoffDrawTypes = new Set<DrawType>(["PLAYOFF", "GROUPS_PLAYOFF"]);
 const normalizeTiebreakerOrder = (value: unknown) => {
   const filtered = Array.isArray(value)
     ? value.filter((item): item is Tiebreaker =>
-        DEFAULT_TIEBREAKERS.includes(item as Tiebreaker)
-      )
+      DEFAULT_TIEBREAKERS.includes(item as Tiebreaker)
+    )
     : [];
   const unique = Array.from(new Set(filtered));
   const hasAll = DEFAULT_TIEBREAKERS.every((item) => unique.includes(item));
@@ -231,8 +231,8 @@ export const computeTournamentStandingsByCategory = (data: TournamentRankingData
           outcomeSide === "A"
             ? "B"
             : outcomeSide === "B"
-            ? "A"
-            : match.winnerSide ?? null;
+              ? "A"
+              : match.winnerSide ?? null;
         if (!winnerSide) return;
         if (winnerSide === "A") {
           teamA.matchesWon += 1;

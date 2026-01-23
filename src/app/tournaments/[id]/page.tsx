@@ -8,6 +8,8 @@ import { notFound } from "next/navigation";
 const toISOStringOrNull = (value?: Date | null) =>
   value ? value.toISOString() : null;
 
+import { type TournamentPublicData } from "@/types/tournament-public";
+
 export default async function TournamentPublicPage({
   params,
 }: {
@@ -207,20 +209,20 @@ export default async function TournamentPublicPage({
       drawType: entry.drawType,
       category: entry.category,
     })),
-      registrations: tournament.registrations.map((registration) => ({
-        id: registration.id,
-        categoryId: registration.categoryId,
-        playerId: registration.player.id,
-        partnerId: registration.partner?.id ?? null,
-        partnerTwoId: registration.partnerTwo?.id ?? null,
-        teamName: registration.teamName,
-        groupName: registration.groupName,
-        rankingNumber: registration.rankingNumber,
-        player: registration.player,
-        partner: registration.partner,
-        partnerTwo: registration.partnerTwo,
-        createdAt: registration.createdAt.toISOString(),
-      })),
+    registrations: tournament.registrations.map((registration) => ({
+      id: registration.id,
+      categoryId: registration.categoryId,
+      playerId: registration.player.id,
+      partnerId: registration.partner?.id ?? null,
+      partnerTwoId: registration.partnerTwo?.id ?? null,
+      teamName: registration.teamName,
+      groupName: registration.groupName,
+      rankingNumber: registration.rankingNumber,
+      player: registration.player,
+      partner: registration.partner,
+      partnerTwo: registration.partnerTwo,
+      createdAt: registration.createdAt.toISOString(),
+    })),
     matches: tournament.matches.map((match) => ({
       id: match.id,
       categoryId: match.categoryId,
@@ -233,38 +235,40 @@ export default async function TournamentPublicPage({
       courtNumber: match.courtNumber,
       club: match.club,
       games: match.games,
-      liveState: match.liveState,
-      winnerSide: match.winnerSide,
+      liveState: match.liveState as any,
+      winnerSide: match.winnerSide as "A" | "B" | null,
       outcomeType: match.outcomeType,
-      outcomeSide: match.outcomeSide,
+      outcomeSide: match.outcomeSide as "A" | "B" | null,
       teamAId: match.teamAId,
       teamBId: match.teamBId,
       category: match.category,
       teamA: match.teamA
         ? {
-            id: match.teamA.id,
-            categoryId: match.teamA.categoryId,
-            teamName: match.teamA.teamName,
-            groupName: match.teamA.groupName,
-            rankingNumber: match.teamA.rankingNumber,
-            player: match.teamA.player,
-            partner: match.teamA.partner,
-            partnerTwo: match.teamA.partnerTwo,
-            createdAt: match.teamA.createdAt.toISOString(),
-          }
+          id: match.teamA.id,
+          categoryId: match.teamA.categoryId,
+          playerId: match.teamA.player.id,
+          teamName: match.teamA.teamName,
+          groupName: match.teamA.groupName,
+          rankingNumber: match.teamA.rankingNumber,
+          player: match.teamA.player,
+          partner: match.teamA.partner,
+          partnerTwo: match.teamA.partnerTwo,
+          createdAt: match.teamA.createdAt.toISOString(),
+        }
         : null,
       teamB: match.teamB
         ? {
-            id: match.teamB.id,
-            categoryId: match.teamB.categoryId,
-            teamName: match.teamB.teamName,
-            groupName: match.teamB.groupName,
-            rankingNumber: match.teamB.rankingNumber,
-            player: match.teamB.player,
-            partner: match.teamB.partner,
-            partnerTwo: match.teamB.partnerTwo,
-            createdAt: match.teamB.createdAt.toISOString(),
-          }
+          id: match.teamB.id,
+          categoryId: match.teamB.categoryId,
+          playerId: match.teamB.player.id,
+          teamName: match.teamB.teamName,
+          groupName: match.teamB.groupName,
+          rankingNumber: match.teamB.rankingNumber,
+          player: match.teamB.player,
+          partner: match.teamB.partner,
+          partnerTwo: match.teamB.partnerTwo,
+          createdAt: match.teamB.createdAt.toISOString(),
+        }
         : null,
     })),
     prizes: tournament.prizes.map((prize) => ({
@@ -278,12 +282,12 @@ export default async function TournamentPublicPage({
     })),
     groupPoints: tournament.groupPoints
       ? {
-          winPoints: tournament.groupPoints.winPoints,
-          winWithoutGameLossPoints: tournament.groupPoints.winWithoutGameLossPoints,
-          lossPoints: tournament.groupPoints.lossPoints,
-          lossWithGameWinPoints: tournament.groupPoints.lossWithGameWinPoints,
-          tiebreakerOrder: tournament.groupPoints.tiebreakerOrder,
-        }
+        winPoints: tournament.groupPoints.winPoints,
+        winWithoutGameLossPoints: tournament.groupPoints.winWithoutGameLossPoints,
+        lossPoints: tournament.groupPoints.lossPoints,
+        lossWithGameWinPoints: tournament.groupPoints.lossWithGameWinPoints,
+        tiebreakerOrder: tournament.groupPoints.tiebreakerOrder,
+      }
       : null,
   };
 
