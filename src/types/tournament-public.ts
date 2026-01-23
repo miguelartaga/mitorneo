@@ -121,3 +121,12 @@ export type TournamentPublicData = {
         tiebreakerOrder?: unknown;
     } | null;
 };
+
+export type ParticipantRow = {
+    id: string;
+    player: Player;
+    category: Category;
+    teamName: string | null;
+    location: string;
+    createdAt: string;
+};

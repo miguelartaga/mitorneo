@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { BracketCanvas } from "@/components/tournaments/bracket-canvas";
 import TournamentPublicFixture from "@/components/tournaments/tournament-public-fixture";
+import TournamentPublicInfo from "@/components/tournaments/tournament-public-info";
+import TournamentPublicParticipants from "@/components/tournaments/tournament-public-participants";
 import {
   computeTournamentStandingsByCategory,
   type TournamentRankingData,
@@ -812,203 +814,19 @@ export default function TournamentPublic({
         </div>
 
         {tab === "info" && (
-          <section className="mt-8">
-            <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-              <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
-                <h2 className="text-lg font-semibold text-slate-900">Reglas</h2>
-                {tournament.rulesText ? (
-                  <div
-                    className="prose prose-invert mt-4 max-w-none text-sm"
-                    dangerouslySetInnerHTML={{ __html: tournament.rulesText }}
-                  />
-                ) : (
-                  <p className="mt-4 text-sm text-slate-500">
-                    Sin reglas publicadas.
-                  </p>
-                )}
-              </div>
-              <div className="space-y-6">
-                <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
-                  <h2 className="text-lg font-semibold text-slate-900">Fechas clave</h2>
-                  <div className="mt-4 space-y-3 text-sm text-slate-500">
-                    <p>Inicio: {formatDateLong(tournament.startDate)}</p>
-                    <p>Fin: {formatDateLong(tournament.endDate)}</p>
-                    <p>
-                      Cierre inscripciones: {formatDateLong(tournament.registrationDeadline)}
-                    </p>
-                    <div>
-                      <p className="mt-4 font-semibold text-slate-900">Dias de juego</p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {tournament.playDays.map((day) => (
-                          <span
-                            key={day}
-                            className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 text-xs text-slate-600"
-                          >
-                            {formatDateShort(day)}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
-                  <h2 className="text-lg font-semibold text-slate-900">Sedes</h2>
-                  <div className="mt-4 space-y-3 text-sm text-slate-500">
-                    {tournament.clubs.map((club) => (
-                      <div
-                        key={club.id}
-                        className="rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3"
-                      >
-                        <p className="font-semibold text-slate-900">{club.name}</p>
-                        <p>{club.address ?? "Sin direccion"}</p>
-                        <p className="text-xs text-slate-500">
-                          Canchas habilitadas: {club.courtsCount ?? 1}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
-                  <h2 className="text-lg font-semibold text-slate-900">
-                    Categorias disponibles
-                  </h2>
-                  <div className="mt-4 space-y-3 text-sm">
-                    {tournament.categories.map((entry) => (
-                      <div
-                        key={entry.categoryId}
-                        className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
-                      >
-                        <div>
-                          <p className="font-semibold text-slate-900">
-                            {entry.category.name}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            {entry.category.abbreviation} - {entry.category.sport?.name ?? "N/D"}
-                          </p>
-                        </div>
-                        <div className="text-xs text-slate-500">
-                          <p>Precio 1: Bs {entry.price}</p>
-                          <p>Precio 2+: Bs {entry.secondaryPrice || entry.price}</p>
-                          <p>Precio hermano: Bs {entry.siblingPrice || entry.price}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
+          <TournamentPublicInfo
+            tournament={tournament}
+            formatDateLong={formatDateLong}
+            formatDateShort={formatDateShort}
+          />
         )}
 
         {tab === "participants" && (
-          <section className="mt-8 space-y-6">
-            <div className="flex flex-wrap items-center gap-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
-              <div className="flex-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                  Filtrar participantes
-                </p>
-                <input
-                  type="text"
-                  value={participantDraft}
-                  onChange={(e) => setParticipantDraft(e.target.value)}
-                  placeholder="Equipo, jugador, ciudad o pais"
-                  className="mt-2 w-full rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-2 text-sm text-slate-100 placeholder:text-slate-400 focus:border-cyan-300 focus:outline-none"
-                />
-              </div>
-              <div className="flex items-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setParticipantQuery(participantDraft)}
-                  className="rounded-full bg-blue-600 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white dark:bg-cyan-400/90 dark:text-slate-900"
-                >
-                  Filtrar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setParticipantDraft("");
-                    setParticipantQuery("");
-                  }}
-                  className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-600"
-                >
-                  Limpiar
-                </button>
-              </div>
-            </div>
-            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-900">
-                    Participantes inscritos
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    {filteredParticipantRows.length} jugadores encontrados
-                  </p>
-                </div>
-              </div>
-              {filteredParticipantRows.length === 0 ? (
-                <p className="mt-4 text-sm text-slate-500">Sin inscritos.</p>
-              ) : (
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  {filteredParticipantRows.map((row) => (
-                    <div
-                      key={row.id}
-                      className="flex gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3 text-sm"
-                    >
-                      <div className="h-14 w-14 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-2)]">
-                        {row.player.photoUrl ? (
-                          <img
-                            src={row.player.photoUrl}
-                            alt={row.player.firstName}
-                            className="h-full w-full object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center bg-[var(--surface-2)] text-slate-400">
-                            <svg
-                              aria-hidden="true"
-                              viewBox="0 0 64 64"
-                              className="h-10 w-10"
-                              fill="none"
-                            >
-                              <circle
-                                cx="32"
-                                cy="24"
-                                r="12"
-                                stroke="currentColor"
-                                strokeWidth="3"
-                              />
-                              <path
-                                d="M12 56c2-10 12-18 20-18s18 8 20 18"
-                                stroke="currentColor"
-                                strokeWidth="3"
-                                strokeLinecap="round"
-                              />
-                            </svg>
-                          </div>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-semibold text-slate-900">
-                          {row.player.firstName} {row.player.lastName}
-                        </p>
-                        <p className="mt-1 text-xs text-blue-600 dark:text-cyan-200">
-                          {row.category.name} ({row.category.abbreviation})
-                        </p>
-                        {row.teamName && (
-                          <p className="mt-1 text-xs text-slate-500">
-                            Equipo: {row.teamName}
-                          </p>
-                        )}
-                        <p className="mt-1 text-xs text-slate-500">
-                          {row.location || "Sin ubicacion"}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
+          <TournamentPublicParticipants
+            participantQuery={participantQuery}
+            setParticipantQuery={setParticipantQuery}
+            filteredParticipantRows={filteredParticipantRows}
+          />
         )}
 
         {tab === "groups" && (

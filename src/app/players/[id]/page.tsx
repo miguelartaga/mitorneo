@@ -211,12 +211,7 @@ export default function PlayerProfilePage() {
           <p className="text-lg font-semibold text-slate-900">
             {error ?? "Jugador no encontrado"}
           </p>
-          <Link
-            href="/admin/players"
-            className="mt-4 inline-flex items-center justify-center rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-white shadow-sm transition hover:bg-slate-800"
-          >
-            Volver
-          </Link>
+
         </div>
       </main>
     );
@@ -242,19 +237,19 @@ export default function PlayerProfilePage() {
 
   return (
     <main
-      className={`${bodyFont.className} player-profile-page relative flex min-h-screen items-center justify-center overflow-hidden px-6 py-14`}
+      className={`${bodyFont.className} player-profile-page relative flex min-h-screen items-center justify-center overflow-hidden px-4 py-10 sm:px-6 sm:py-14`}
     >
       <div className="player-profile-glow player-profile-glow--top pointer-events-none absolute left-1/2 top-0 h-72 w-72 -translate-x-1/2 rounded-full blur-[140px]" />
       <div className="player-profile-glow player-profile-glow--bottom pointer-events-none absolute bottom-0 right-0 h-80 w-80 rounded-full blur-[160px]" />
 
-      <div className="player-profile-shell w-full max-w-5xl rounded-[32px] border p-6 sm:p-10 shadow-[0_30px_60px_-45px_rgba(15,23,42,0.5)] backdrop-blur">
+      <div className="player-profile-shell w-full max-w-5xl rounded-[32px] border p-5 sm:p-10 shadow-[0_30px_60px_-45px_rgba(15,23,42,0.5)] backdrop-blur">
         <div className="flex flex-wrap items-start justify-between gap-6">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.45em] text-amber-600">
-              Jugador destacado
+              Perfil del jugador
             </p>
             <h1
-              className={`${displayFont.className} mt-3 text-4xl font-semibold text-slate-900`}
+              className={`${displayFont.className} mt-3 text-3xl font-semibold text-slate-900 sm:text-4xl`}
             >
               {player.firstName} {player.lastName}
             </h1>
@@ -268,12 +263,7 @@ export default function PlayerProfilePage() {
             </div>
           </div>
 
-          <Link
-            href="/admin/players"
-            className="inline-flex items-center justify-center rounded-full bg-slate-900 px-5 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white shadow-sm transition hover:bg-slate-800"
-          >
-            Volver
-          </Link>
+
         </div>
 
         <div className="mt-10 grid gap-8 lg:grid-cols-[260px_1fr]">
