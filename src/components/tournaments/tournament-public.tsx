@@ -1483,26 +1483,26 @@ export default function TournamentPublic({
                         </div>
                       ))}
                     </div>
-                  {entry.groups.length === 1 && entry.groups[0].entries.length > 0 && (
-                    <div className="mt-5 rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4 text-xs text-slate-600">
-                      <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-200">
-                        Posiciones finales
-                      </p>
-                      <div className="mt-2 flex flex-wrap gap-3">
-                        {entry.groups[0].entries.slice(0, 3).map((item, idx) => {
-                          const reg = registrationById.get(item.id);
-                          return (
-                            <div
-                              key={`${item.id}-podium`}
-                              className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 text-[11px]"
-                            >
-                              {idx + 1}Âº {reg ? teamLabel(reg) : "N/D"}
-                            </div>
-                          );
-                        })}
+                    {entry.groups.length === 1 && entry.groups[0].entries.length > 0 && (
+                      <div className="mt-5 rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4 text-xs text-slate-600">
+                        <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-200">
+                          Posiciones finales
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-3">
+                          {entry.groups[0].entries.slice(0, 3).map((item, idx) => {
+                            const reg = registrationById.get(item.id);
+                            return (
+                              <div
+                                key={`${item.id}-podium`}
+                                className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 text-[11px]"
+                              >
+                                {idx + 1}º {reg ? teamLabel(reg) : "N/D"}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
-                  </div>
                   <div className="mt-4">
                     <BracketCanvas
                       categoryId={entry.category.id}
@@ -1537,116 +1537,121 @@ export default function TournamentPublic({
                 Aun no hay resultados registrados.
               </div>
             ) : (
-              [...resultMatches]
-                .sort((a, b) => {
-                  const aLive = a.liveState?.isLive ? 1 : 0;
-                  const bLive = b.liveState?.isLive ? 1 : 0;
-                  if (aLive !== bLive) return bLive - aLive;
-                  return 0;
-                })
-                .map((match) => {
-                const category =
-                  match.category ?? categoriesById.get(match.categoryId);
-                const score = formatMatchScore(match, getMatchCategory(match));
-                const scoreParts = score ? score.split(" | ") : [];
-                const activeSetIndex =
-                  typeof match.liveState?.activeSet === "number"
-                    ? match.liveState.activeSet
-                    : null;
-                const mainScore =
-                  activeSetIndex !== null && scoreParts[activeSetIndex]
-                    ? scoreParts[activeSetIndex]
-                    : score ?? "N/D";
-                const unitLabel =
-                  tournament.sport?.name?.toLowerCase().includes("fronton")
-                    ? "Cancha"
-                    : "Set";
-                const detailedScore =
-                  activeSetIndex !== null
-                    ? null
-                    : scoreParts.length
-                      ? scoreParts
-                          .map((part, index) => `${unitLabel} ${index + 1}: ${part}`)
-                          .join(" Â· ")
-                      : null;
-                const setLeadLabel =
-                  activeSetIndex !== null && activeSetIndex > 0
-                    ? (() => {
-                        let aWins = 0;
-                        let bWins = 0;
-                        for (let i = 0; i < activeSetIndex; i += 1) {
-                          const part = scoreParts[i];
-                          if (!part) continue;
-                          const [aRaw, bRaw] = part.split("-");
-                          const aVal = Number(aRaw);
-                          const bVal = Number(bRaw);
-                          if (!Number.isFinite(aVal) || !Number.isFinite(bVal)) continue;
-                          if (aVal > bVal) aWins += 1;
-                          if (bVal > aVal) bWins += 1;
-                        }
-                        const label = unitLabel === "Cancha" ? "Cancha a favor" : "Set a favor";
-                        return `${label} ${aWins}-${bWins}`;
-                      })()
-                    : null;
-                const isLive = Boolean(match.liveState?.isLive);
-                const isFinished = isMatchComplete(match);
-                return (
-                  <div
-                    key={`bracket-${entry.category.id}`}
-                    className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6"
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-lg font-semibold text-slate-900">
-                          {entry.category.name}
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          {entry.category.abbreviation}
-                        </p>
+              <div className="grid gap-4 md:grid-cols-2">
+                {[...resultMatches]
+                  .sort((a, b) => {
+                    const aLive = a.liveState?.isLive ? 1 : 0;
+                    const bLive = b.liveState?.isLive ? 1 : 0;
+                    if (aLive !== bLive) return bLive - aLive;
+                    return 0;
+                  })
+                  .map((match) => {
+                    const category =
+                      match.category ?? categoriesById.get(match.categoryId);
+                    const score = formatMatchScore(match, getMatchCategory(match));
+                    const scoreParts = score ? score.split(" | ") : [];
+                    const activeSetIndex =
+                      typeof match.liveState?.activeSet === "number"
+                        ? match.liveState.activeSet
+                        : null;
+                    const mainScore =
+                      activeSetIndex !== null && scoreParts[activeSetIndex]
+                        ? scoreParts[activeSetIndex]
+                        : score ?? "N/D";
+                    const unitLabel =
+                      tournament.sport?.name?.toLowerCase().includes("fronton")
+                        ? "Cancha"
+                        : "Set";
+                    const detailedScore =
+                      activeSetIndex !== null
+                        ? null
+                        : scoreParts.length
+                          ? scoreParts
+                              .map(
+                                (part, index) =>
+                                  `${unitLabel} ${index + 1}: ${part}`
+                              )
+                              .join(" - ")
+                          : null;
+                    const setLeadLabel =
+                      activeSetIndex !== null && activeSetIndex > 0
+                        ? (() => {
+                            let aWins = 0;
+                            let bWins = 0;
+                            for (let i = 0; i < activeSetIndex; i += 1) {
+                              const part = scoreParts[i];
+                              if (!part) continue;
+                              const [aRaw, bRaw] = part.split("-");
+                              const aVal = Number(aRaw);
+                              const bVal = Number(bRaw);
+                              if (!Number.isFinite(aVal) || !Number.isFinite(bVal)) {
+                                continue;
+                              }
+                              if (aVal > bVal) aWins += 1;
+                              if (bVal > aVal) bWins += 1;
+                            }
+                            const label =
+                              unitLabel === "Cancha" ? "Cancha a favor" : "Set a favor";
+                            return `${label} ${aWins}-${bWins}`;
+                          })()
+                        : null;
+                    const isLive = Boolean(match.liveState?.isLive);
+                    const isFinished = isMatchComplete(match);
+                    const dateLabel = match.scheduledDate
+                      ? formatDateShort(match.scheduledDate)
+                      : "Sin fecha";
+                    return (
+                      <div
+                        key={match.id}
+                        className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-[11px] uppercase tracking-[0.2em] text-slate-500">
+                              {category?.abbreviation ?? "N/D"} - {getPlayoffLabel(match)}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {dateLabel}
+                              {match.startTime ? ` - ${match.startTime}` : ""}
+                            </p>
+                          </div>
+                          {isLive && (
+                            <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-rose-200">
+                              En vivo
+                            </span>
+                          )}
+                          {!isLive && isFinished && (
+                            <span className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                              Finalizado
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-4 grid gap-2">
+                          <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-sm">
+                            <span className="font-semibold text-slate-900">
+                              {teamLabel(match.teamA)}
+                            </span>
+                            <span className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 text-[11px] font-semibold text-slate-600">
+                              {mainScore ?? "-"}
+                            </span>
+                            <span className="text-right font-semibold text-slate-900">
+                              {teamLabel(match.teamB)}
+                            </span>
+                          </div>
+                          {detailedScore && (
+                            <p className="text-[11px] text-slate-500">{detailedScore}</p>
+                          )}
+                          {setLeadLabel && (
+                            <p className="text-[11px] text-slate-500">{setLeadLabel}</p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    <div className="mt-4">
-                      <BracketCanvas
-                        categoryId={entry.category.id}
-                        matches={entry.matches}
-                        roundNumbers={entry.roundNumbers}
-                        bracketSize={entry.bracketSize}
-                        registrationMap={registrationMap}
-                        labelByRegistration={labelByRegistration}
-                        matchStatusByMatchId={entry.matchStatusByMatchId}
-                        className="relative overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3"
-                        theme={themeMode}
-                        disableSwap
-                      />
-                    </div>
-                  </div>
-                ))
-              )}
-            </section>
-          )
-        }
-
-        {
-          tab === "results" && (
-            <section className="mt-8 space-y-6">
-              {matchesError && (
-                <p className="rounded-2xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-                  {matchesError}
-                </p>
-                <p>Correo: {tournament.owner?.email ?? "Sin correo"}</p>
-                <p>Direccion: {tournament.address ?? "Sin direccion"}</p>
+                    );
+                  })}
               </div>
-            </div>
-            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
-              <h2 className="text-lg font-semibold text-slate-900">Ubicacion</h2>
-              <p className="mt-4 text-sm text-slate-500">
-                Consulta las sedes y horarios en la pestaÃ±a de tiempos.
-              </p>
-            </div>
+            )}
           </section>
         )}
-      </div>
-
         {
           tab === "prizes" && (
             <section className="mt-8 space-y-6">
@@ -1735,9 +1740,9 @@ export default function TournamentPublic({
             </section>
           )
         }
-      </div >
+      </div>
 
-    </main >
+    </main>
   );
 }
 
