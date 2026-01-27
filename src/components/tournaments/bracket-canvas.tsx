@@ -1,8 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
-
-type CreateBracketFn = typeof import("bracketry")["createBracket"];
+import { useEffect, useMemo, useState } from "react";
 
 type BracketPlayer = {
   firstName: string;
@@ -24,6 +22,7 @@ export type BracketMatch = {
   teamAId?: string | null;
   teamBId?: string | null;
   createdAt?: string;
+  orderHint?: number;
 };
 
 type BracketContestant = {
@@ -49,11 +48,13 @@ type BracketBuildParams = {
   categoryId: string;
   bracketSize?: number;
   matches: BracketMatch[];
+  bronzeMatches?: BracketMatch[];
   roundNumbers: number[];
   roundLabelMap?: Map<number, string>;
   registrationMap: Map<string, BracketRegistration>;
   labelByRegistration: Map<string, string>;
   matchStatusByMatchId?: Map<string, string>;
+  bracketState?: "draft" | "locked" | "published";
 };
 
 const formatTeamName = (registration?: BracketRegistration) => {
@@ -88,11 +89,13 @@ const buildBracketData = ({
   categoryId,
   bracketSize,
   matches,
+  bronzeMatches,
   roundNumbers,
   roundLabelMap,
   registrationMap,
   labelByRegistration,
   matchStatusByMatchId,
+  bracketState,
 }: BracketBuildParams) => {
   const contestants: Record<string, BracketContestant> = {};
   const ensureRegistrationContestant = (id: string) => {
@@ -112,7 +115,8 @@ const buildBracketData = ({
       players: [{ title }],
     };
   };
-  matches.forEach((match) => {
+  const allMatches = [...matches, ...(bronzeMatches ?? [])];
+  allMatches.forEach((match) => {
     if (match.teamAId) ensureRegistrationContestant(match.teamAId);
     if (match.teamBId) ensureRegistrationContestant(match.teamBId);
   });
@@ -145,6 +149,13 @@ const buildBracketData = ({
       const roundB =
         roundIndexMap.get(b.roundNumber ?? normalizedRoundNumbers[0]) ?? 0;
       if (roundA !== roundB) return roundA - roundB;
+      const orderA = typeof a.orderHint === "number" ? a.orderHint : null;
+      const orderB = typeof b.orderHint === "number" ? b.orderHint : null;
+      if (orderA !== null || orderB !== null) {
+        if (orderA === null) return 1;
+        if (orderB === null) return -1;
+        if (orderA !== orderB) return orderA - orderB;
+      }
       const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
       const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
       return timeA - timeB;
@@ -162,6 +173,14 @@ const buildBracketData = ({
         roundIndexValue: number,
         hasOpponent: boolean
       ): BracketSide => {
+        if (roundIndexValue > 0 && bracketState === "draft") {
+          if (teamId && !hasOpponent) {
+            return { contestantId: teamId };
+          }
+          const pendingId = `pending-${categoryId}-${match.id}-${sideIndex}`;
+          ensurePlaceholderContestant(pendingId, "Por definir");
+          return { contestantId: pendingId };
+        }
         if (teamId) {
           return {
             contestantId: teamId,
@@ -212,6 +231,7 @@ const buildBracketData = ({
 export type BracketCanvasProps = {
   categoryId: string;
   matches: BracketMatch[];
+  bronzeMatches?: BracketMatch[];
   roundNumbers: number[];
   roundLabelMap?: Map<number, string>;
   bracketSize?: number;
@@ -220,11 +240,20 @@ export type BracketCanvasProps = {
   matchStatusByMatchId?: Map<string, string>;
   className?: string;
   theme?: "light" | "dark";
+  swapMode?: "drag" | "select";
+  selectableRegistrationIds?: string[];
   onSwapSides?: (
     from: { matchId: string; side: "A" | "B" },
     to: { matchId: string; side: "A" | "B" }
   ) => Promise<void>;
+  onSelectSwap?: (
+    matchId: string,
+    side: "A" | "B",
+    registrationId: string
+  ) => Promise<void> | void;
   disableSwap?: boolean;
+  occupiedRegistrationIds?: Set<string>;
+  bracketState?: "draft" | "locked" | "published";
 };
 
 type DragInfo = {
@@ -250,15 +279,16 @@ const bracketOptions = {
   verticalScrollMode: "native" as const,
   navButtonsPosition: "hidden" as const,
   rootFontFamily: "Inter, system-ui, sans-serif",
-  matchFontSize: 12,
-  distanceBetweenScorePairs: 6,
-  matchMinVerticalGap: 18,
-  matchHorMargin: 12,
+  matchFontSize: 13,
+  distanceBetweenScorePairs: 8,
+  matchMinVerticalGap: 28,
+  matchHorMargin: 18,
 };
 
 export const BracketCanvas = ({
   categoryId,
   matches,
+  bronzeMatches,
   roundNumbers,
   roundLabelMap,
   bracketSize,
@@ -267,23 +297,27 @@ export const BracketCanvas = ({
   matchStatusByMatchId,
   className,
   theme = "light",
+  swapMode = "drag",
+  selectableRegistrationIds = [],
   onSwapSides,
+  onSelectSwap,
   disableSwap,
+  occupiedRegistrationIds = new Set<string>(),
+  bracketState = "draft",
 }: BracketCanvasProps) => {
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const bracketRef = useRef<BracketInstance | null>(null);
-  const createBracketRef = useRef<CreateBracketFn | null>(null);
   const data = useMemo(
     () =>
       buildBracketData({
         categoryId,
         bracketSize,
-        matches,
-        roundNumbers,
-        roundLabelMap,
-        registrationMap,
-        labelByRegistration,
-        matchStatusByMatchId,
+    matches,
+    bronzeMatches,
+    roundNumbers,
+    roundLabelMap,
+    registrationMap,
+    labelByRegistration,
+    matchStatusByMatchId,
+    bracketState,
       }),
     [
       categoryId,
@@ -294,211 +328,531 @@ export const BracketCanvas = ({
       registrationMap,
       labelByRegistration,
       matchStatusByMatchId,
+      bracketState,
     ]
   );
-  const options = useMemo(
-    () => ({
-      ...bracketOptions,
-      matchTextColor: theme === "dark" ? "#e2e8f0" : "#03060c",
-      matchStatusBgColor:
-        theme === "dark" ? "transparent" : "#cdcfd7",
-      roundTitleColor: theme === "dark" ? "#e2e8f0" : "#0f172a",
-      roundTitlesBorderColor:
-        theme === "light" ? "rgb(4, 4, 5)" : "#e2e8f000",
-    }),
-    [theme]
-  );
-  const matchKeyToId = useMemo(() => {
-    const map = new Map<string, string>();
-    data.matches.forEach((match) => {
-      if (match.matchId) {
-        map.set(`${match.roundIndex}:${match.order}`, match.matchId);
-      }
-    });
-    return map;
-  }, [data.matches]);
-  const dragInfoRef = useRef<DragInfo | null>(null);
-  const swapInFlightRef = useRef(false);
-  const syncDraggable = () => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
-    const canSwap = Boolean(onSwapSides) && !disableSwap;
-    const scroller = wrapper.querySelector<HTMLElement>(".matches-scroller");
-    if (scroller) {
-      scroller.style.pointerEvents = "auto";
-    }
-    const sideElements = wrapper.querySelectorAll<HTMLElement>(".side-wrapper");
-    sideElements.forEach((side) => {
-      const contestantId = side.getAttribute("contestant-id");
-      const isPlaceholder =
-        contestantId?.startsWith("bye-") ||
-        contestantId?.startsWith("empty-") ||
-        contestantId?.startsWith("pending-");
-      const isDraggable = canSwap && Boolean(contestantId) && !isPlaceholder;
-      side.style.pointerEvents = "auto";
-      side.style.cursor = isDraggable ? "grab" : "default";
-      side.setAttribute("draggable", isDraggable ? "true" : "false");
-      side
-        .querySelectorAll<HTMLElement>(
-          ".players-info, .player-wrapper, .player-title"
-        )
-        .forEach((child) => {
-          child.setAttribute("draggable", isDraggable ? "true" : "false");
-        });
-    });
-  };
-
-  useEffect(() => {
-    let active = true;
-    const install = async () => {
-      if (data.matches.length === 0) {
-        bracketRef.current?.uninstall();
-        bracketRef.current = null;
-        return;
-      }
-      if (!wrapperRef.current) return;
-      if (!createBracketRef.current) {
-        const bracketryModule = await import("bracketry");
-        if (!active) return;
-        createBracketRef.current = bracketryModule.createBracket;
-      }
-      const createBracket = createBracketRef.current;
-      if (!createBracket) return;
-      if (bracketRef.current) {
-        bracketRef.current.replaceData(data);
-      } else {
-        bracketRef.current = createBracket(data, wrapperRef.current, options);
-      }
-      requestAnimationFrame(() => {
-        syncDraggable();
+  const missingOrderHintByRound = useMemo(() => {
+    if (bracketState !== "draft") return [];
+    const map = new Map<number, number>();
+    data.matches
+      .filter((match) => match.roundIndex > 0)
+      .forEach((match) => {
+        const hint = matches.find((item) => item.id === match.matchId)?.orderHint;
+        if (typeof hint !== "number") {
+          map.set(match.roundIndex, (map.get(match.roundIndex) ?? 0) + 1);
+        }
       });
-    };
-    install();
-    return () => {
-      active = false;
-    };
-  }, [data, options]);
-
-  useEffect(() => {
-    const wrapper = wrapperRef.current;
-    if (!wrapper) return;
-    const canSwap = Boolean(onSwapSides) && !disableSwap;
-    if (!canSwap) {
-      syncDraggable();
-      return;
-    }
-
-    const handleDragStart = (event: DragEvent) => {
-      const target = (event.target as HTMLElement | null)?.closest(
-        ".side-wrapper"
-      ) as HTMLElement | null;
-      if (!target) return;
-      const contestantId = target.getAttribute("contestant-id");
-      if (!contestantId) return;
-      const match = target.closest(".match-wrapper") as HTMLElement | null;
-      if (!match) return;
-      const roundIndex = Number(match.getAttribute("round-index") ?? 0);
-      const order = Number(match.getAttribute("match-order") ?? 0);
-      const sideIndex = Number(target.getAttribute("side-order") ?? 0);
-      dragInfoRef.current = {
-        matchId: matchKeyToId.get(`${roundIndex}:${order}`) ?? "",
-        side: sideIndex === 0 ? "A" : "B",
-        contestantId,
-        roundIndex,
-        order,
-      };
-      if (event.dataTransfer) {
-        event.dataTransfer.effectAllowed = "move";
-      }
-    };
-
-    const handleDragOver = (event: DragEvent) => {
-      if (!dragInfoRef.current) return;
-      const target = (event.target as HTMLElement | null)?.closest(
-        ".side-wrapper"
-      ) as HTMLElement | null;
-      if (!target) return;
-      const contestantId = target.getAttribute("contestant-id");
-      if (!contestantId) return;
-      if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = "move";
-      }
-      event.preventDefault();
-    };
-
-    const handleDrop = async (event: DragEvent) => {
-      if (!dragInfoRef.current) return;
-      const target = (event.target as HTMLElement | null)?.closest(
-        ".side-wrapper"
-      ) as HTMLElement | null;
-      if (!target) return;
-      const contestantId = target.getAttribute("contestant-id");
-      if (!contestantId) return;
-      const match = target.closest(".match-wrapper") as HTMLElement | null;
-      if (!match) return;
-      const roundIndex = Number(match.getAttribute("round-index") ?? 0);
-      const order = Number(match.getAttribute("match-order") ?? 0);
-      const sideIndex = Number(target.getAttribute("side-order") ?? 0);
-      const matchId = matchKeyToId.get(`${roundIndex}:${order}`) ?? "";
-      if (!matchId) return;
-      const from = dragInfoRef.current;
-      if (!from.matchId) return;
-      if (swapInFlightRef.current) return;
-      const to = { matchId, side: sideIndex === 0 ? "A" : "B" } as const;
-      if (from.matchId === to.matchId && from.side === to.side) return;
-      swapInFlightRef.current = true;
-      try {
-        await onSwapSides?.({ matchId: from.matchId, side: from.side }, to);
-      } finally {
-        swapInFlightRef.current = false;
-        dragInfoRef.current = null;
-      }
-    };
-
-    const handleDragEnd = () => {
-      dragInfoRef.current = null;
-    };
-
-    wrapper.addEventListener("dragstart", handleDragStart);
-    wrapper.addEventListener("dragover", handleDragOver);
-    wrapper.addEventListener("drop", handleDrop);
-    wrapper.addEventListener("dragend", handleDragEnd);
-    syncDraggable();
-    return () => {
-      wrapper.removeEventListener("dragstart", handleDragStart);
-      wrapper.removeEventListener("dragover", handleDragOver);
-      wrapper.removeEventListener("drop", handleDrop);
-      wrapper.removeEventListener("dragend", handleDragEnd);
-    };
-  }, [matchKeyToId, onSwapSides, disableSwap]);
-
-  useEffect(() => {
-    syncDraggable();
-  }, [disableSwap, onSwapSides]);
-
+    return Array.from(map.entries());
+  }, [bracketState, data.matches, matches]);
+  if (missingOrderHintByRound.length > 0) {
+    console.warn(
+      "[bracket] missing orderHint in rounds:",
+      missingOrderHintByRound.map(([round, count]) => `r${round + 1}=${count}`)
+    );
+  }
   const wrapperClassName = [
     className ??
-      "relative overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm",
+      "relative overflow-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-sm",
     theme === "dark" ? "bracket-theme-dark" : null,
   ]
     .filter(Boolean)
     .join(" ");
+  const [viewportWidth, setViewportWidth] = useState<number | null>(null);
+  useEffect(() => {
+    const update = () => setViewportWidth(window.innerWidth);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   return (
     <>
-      {theme === "dark" && (
-        <style jsx global>{`
-          .bracket-theme-dark .match-status {
-            background: transparent !important;
-            box-shadow: none !important;
-            color: #e2e8f0 !important;
-          }
-          .bracket-theme-dark .match-wrapper.highlighted .match-status {
-            border-color: rgba(226, 232, 240, 0.6) !important;
-          }
-        `}</style>
-      )}
-      <div ref={wrapperRef} className={wrapperClassName} />
+      <style jsx global>{`
+        .simple-bracket {
+          position: relative;
+          overflow: auto;
+          min-height: 320px;
+          padding: 8px;
+          -webkit-overflow-scrolling: touch;
+        }
+        .simple-bracket-grid {
+          position: relative;
+          min-height: 320px;
+        }
+        .simple-bracket-lines {
+          position: absolute;
+          inset: 0;
+          z-index: 0;
+          fill: none;
+          stroke: rgba(99, 102, 241, 0.35);
+          stroke-width: 2;
+        }
+        .simple-bracket-round-column {
+          position: absolute;
+          top: 0;
+          z-index: 1;
+          display: flex;
+          flex-direction: column;
+          align-items: stretch;
+        }
+        .simple-bracket-round-title {
+          font-size: 10px;
+          letter-spacing: 0.22em;
+          text-transform: uppercase;
+          font-weight: 700;
+          color: #475569;
+          text-align: center;
+          margin-bottom: 12px;
+        }
+        .simple-bracket-match {
+          position: absolute;
+          left: 0;
+          right: 0;
+          border-radius: 14px;
+          border: 1px solid #e2e8f0;
+          background: #fff;
+          box-shadow: 0 12px 32px -24px rgba(15, 23, 42, 0.5);
+          padding: 10px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .simple-bracket-side {
+          border-radius: 10px;
+          border: 1px solid #e5e7eb;
+          padding: 6px 8px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 12px;
+          color: #0f172a;
+          background: #f8fafc;
+        }
+        .simple-bracket-side select {
+          width: 100%;
+          border-radius: 8px;
+          border: 1px solid #e2e8f0;
+          padding: 4px 6px;
+          font-size: 12px;
+          background: #fff;
+        }
+        .simple-bracket-meta {
+          font-size: 10px;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.18em;
+          color: #6366f1;
+        }
+      `}</style>
+      <div className={wrapperClassName}>
+        {data.rounds.length === 0 ? (
+          <div className="text-sm text-slate-500">Sin llaves</div>
+        ) : (
+          <div className="simple-bracket">
+            {(() => {
+              const isRealContestant = (id?: string) =>
+                Boolean(id) &&
+                !String(id).startsWith("bye-") &&
+                !String(id).startsWith("empty-") &&
+                !String(id).startsWith("pending-");
+
+              const getSideId = (side?: BracketSide) =>
+                side?.contestantId ?? undefined;
+
+              const roundsMatches = data.rounds.map((round, roundIndex) => ({
+                roundIndex,
+                name: round.name,
+                matches: data.matches
+                  .filter((match) => match.roundIndex === roundIndex)
+                  .sort((a, b) => a.order - b.order),
+              }));
+
+              const draftRounds =
+                bracketState === "draft" && roundsMatches.length > 0
+                  ? (() => {
+                      const firstRound = roundsMatches[0].matches;
+                      const roundCount = roundsMatches.length;
+                      const draft = [] as Array<{
+                        name: string;
+                        matches: Array<{
+                          matchId?: string;
+                          order: number;
+                          aId?: string;
+                          bId?: string;
+                        }>;
+                      }>;
+
+                      const firstMatches = firstRound.map((match) => {
+                        const aId = isRealContestant(getSideId(match.sides[0]))
+                          ? getSideId(match.sides[0])
+                          : undefined;
+                        const bId = isRealContestant(getSideId(match.sides[1]))
+                          ? getSideId(match.sides[1])
+                          : undefined;
+                        return {
+                          matchId: match.matchId,
+                          order: match.order,
+                          aId,
+                          bId,
+                        };
+                      });
+
+                      draft.push({
+                        name: roundsMatches[0].name,
+                        matches: firstMatches,
+                      });
+
+                      for (
+                        let roundIndex = 1;
+                        roundIndex < roundCount;
+                        roundIndex += 1
+                      ) {
+                        const prev = draft[roundIndex - 1].matches;
+                        const nextMatches: Array<{
+                          matchId?: string;
+                          order: number;
+                          aId?: string;
+                          bId?: string;
+                        }> = [];
+                        const matchesCount = Math.max(
+                          1,
+                          Math.floor(prev.length / 2)
+                        );
+                        for (let i = 0; i < matchesCount; i += 1) {
+                          const feederA = prev[i * 2];
+                          const feederB = prev[i * 2 + 1];
+                          const allowAutoAdvance = roundIndex === 1;
+                          const aId = allowAutoAdvance
+                            ? feederA && feederA.aId && !feederA.bId
+                              ? feederA.aId
+                              : feederA && feederA.bId && !feederA.aId
+                              ? feederA.bId
+                              : undefined
+                            : undefined;
+                          const bId = allowAutoAdvance
+                            ? feederB && feederB.aId && !feederB.bId
+                              ? feederB.aId
+                              : feederB && feederB.bId && !feederB.aId
+                              ? feederB.bId
+                              : undefined
+                            : undefined;
+                          nextMatches.push({
+                            order: i,
+                            aId,
+                            bId,
+                          });
+                        }
+                        draft.push({
+                          name:
+                            roundsMatches[roundIndex]?.name ??
+                            `Ronda ${roundIndex + 1}`,
+                          matches: nextMatches,
+                        });
+                      }
+
+                      return draft;
+                    })()
+                  : null;
+
+              const renderRounds = draftRounds
+                ? draftRounds.map((round, roundIndex) => ({
+                    roundIndex,
+                    name: round.name,
+                    matches: round.matches.map((match) => ({
+                      matchId: match.matchId,
+                      order: match.order,
+                      displayA: match.aId,
+                      displayB: match.bId,
+                    })),
+                  }))
+                : roundsMatches.map((round) => ({
+                    roundIndex: round.roundIndex,
+                    name: round.name,
+                    matches: round.matches.map((match) => ({
+                      matchId: match.matchId,
+                      order: match.order,
+                      displayA: isRealContestant(getSideId(match.sides[0]))
+                        ? getSideId(match.sides[0])
+                        : undefined,
+                      displayB: isRealContestant(getSideId(match.sides[1]))
+                        ? getSideId(match.sides[1])
+                        : undefined,
+                      rawSides: match.sides,
+                    })),
+                  }));
+
+              const isMobile =
+                typeof viewportWidth === "number" && viewportWidth < 640;
+              const matchHeight = isMobile ? 108 : 120;
+              const matchWidth = isMobile ? 260 : 300;
+              const columnGap = isMobile ? 96 : 140;
+              const step = matchHeight + (isMobile ? 40 : 52);
+              const roundCount = renderRounds.length;
+              const firstCount = Math.max(1, renderRounds[0]?.matches.length ?? 1);
+              const totalWidth =
+                roundCount * matchWidth + Math.max(0, roundCount - 1) * columnGap;
+
+              const getCenterY = (roundIndex: number, matchIndex: number) => {
+                const stepR = step * Math.pow(2, roundIndex);
+                const offset = stepR / 2;
+                return offset + stepR * matchIndex;
+              };
+              const bronzeCount = bronzeMatches?.length ?? 0;
+              const bronzeExtra = bronzeCount > 0 ? matchHeight + 56 : 0;
+              const totalHeight = firstCount * step + bronzeExtra;
+
+              const lines: Array<{
+                d: string;
+                key: string;
+              }> = [];
+
+              renderRounds.forEach((round, roundIndex) => {
+                if (roundIndex >= roundCount - 1) return;
+                const nextLeft = roundIndex * (matchWidth + columnGap) + matchWidth + columnGap;
+                const currentLeft = roundIndex * (matchWidth + columnGap) + matchWidth;
+                const midX = currentLeft + columnGap / 2;
+                round.matches.forEach((match, matchIndex) => {
+                  const targetIndex = Math.floor(matchIndex / 2);
+                  const y1 = getCenterY(roundIndex, matchIndex);
+                  const y2 = getCenterY(roundIndex + 1, targetIndex);
+                  const x1 = currentLeft;
+                  const x2 = nextLeft - columnGap;
+                  const d = `M ${x1} ${y1} H ${midX} V ${y2} H ${x2}`;
+                  lines.push({
+                    d,
+                    key: `${roundIndex}-${matchIndex}`,
+                  });
+                });
+              });
+
+              const renderBronze = () => {
+                if (!bronzeMatches || bronzeMatches.length === 0) return null;
+                const match = bronzeMatches[0];
+                const displayA = match.teamAId ?? undefined;
+                const displayB = match.teamBId ?? undefined;
+                const hasTeamA = Boolean(displayA);
+                const hasTeamB = Boolean(displayB);
+                const top = firstCount * step + 32;
+                const columnLeft = (roundCount - 1) * (matchWidth + columnGap);
+
+                const renderSideStatic = (
+                  teamId?: string | null,
+                  hasOpponent?: boolean
+                ) => {
+                  if (teamId) {
+                    const registration = registrationMap.get(teamId);
+                    const label = formatTeamName(registration);
+                    const seedLabel = labelByRegistration.get(teamId);
+                    return (
+                      <div className="simple-bracket-side">
+                        {seedLabel ? `${seedLabel} ` : ""}
+                        {label}
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="simple-bracket-side">
+                      {hasOpponent ? "Bye" : "Por definir"}
+                    </div>
+                  );
+                };
+
+                return (
+                  <div
+                    className="simple-bracket-round-column"
+                    style={{ left: columnLeft, width: matchWidth }}
+                  >
+                    <div className="simple-bracket-round-title">3er lugar</div>
+                    <div
+                      className="simple-bracket-match"
+                      style={{ top, height: matchHeight }}
+                    >
+                      <div className="simple-bracket-meta">3er lugar</div>
+                      {renderSideStatic(displayA, hasTeamB)}
+                      {renderSideStatic(displayB, hasTeamA)}
+                    </div>
+                  </div>
+                );
+              };
+
+              return (
+                <div
+                  className="simple-bracket-grid"
+                  style={{
+                    height: totalHeight,
+                    width: totalWidth,
+                  }}
+                >
+                  <svg
+                    className="simple-bracket-lines"
+                    width={totalWidth}
+                    height={totalHeight}
+                    viewBox={`0 0 ${totalWidth} ${totalHeight}`}
+                    preserveAspectRatio="none"
+                  >
+                    {lines.map((line) => (
+                      <path key={line.key} d={line.d} />
+                    ))}
+                  </svg>
+                  {renderRounds.map((round, roundIndex) => {
+                    const columnLeft = roundIndex * (matchWidth + columnGap);
+                    return (
+                      <div
+                        key={`${round.roundIndex}-${round.name}`}
+                        className="simple-bracket-round-column"
+                        style={{ left: columnLeft, width: matchWidth }}
+                      >
+                        <div className="simple-bracket-round-title">
+                          {round.name}
+                        </div>
+                        {round.matches.map((match) => {
+                          const matchIndex = match.order ?? 0;
+                          const top = getCenterY(roundIndex, matchIndex) - matchHeight / 2;
+                          const displayA = match.displayA;
+                          const displayB = match.displayB;
+                          const hasTeamA = Boolean(displayA);
+                          const hasTeamB = Boolean(displayB);
+                          const canSelect =
+                            bracketState === "draft" &&
+                            swapMode === "select" &&
+                            Boolean(onSelectSwap) &&
+                            selectableRegistrationIds.length > 0 &&
+                            round.roundIndex === 0;
+
+                          const renderSide = (
+                            side: BracketSide | undefined,
+                            sideKey: "A" | "B",
+                            hasOpponent: boolean,
+                            displayId?: string
+                          ) => {
+                            const contestantId = side?.contestantId;
+                            const isPlaceholder =
+                              contestantId?.startsWith("bye-") ||
+                              contestantId?.startsWith("empty-") ||
+                              contestantId?.startsWith("pending-");
+                            const currentId = isPlaceholder ? "" : contestantId ?? "";
+
+                            if (canSelect) {
+                              const effectiveId = displayId ?? currentId;
+                              const currentRegistration =
+                                effectiveId && registrationMap.has(effectiveId)
+                                  ? registrationMap.get(effectiveId)
+                                  : undefined;
+                              const currentLabel = effectiveId
+                                ? formatTeamName(currentRegistration)
+                                : "";
+                              const currentSeedLabel = effectiveId
+                                ? labelByRegistration.get(effectiveId)
+                                : undefined;
+                              const currentExistsInOptions =
+                                effectiveId &&
+                                selectableRegistrationIds.includes(effectiveId);
+                              return (
+                                <div className="simple-bracket-side">
+                                  <select
+                                    disabled={Boolean(disableSwap)}
+                                    value={effectiveId || ""}
+                                    onChange={(event) => {
+                                      const value = event.target.value;
+                                      if (!value) return;
+                                      onSelectSwap?.(
+                                        match.matchId ?? "",
+                                        sideKey,
+                                        value
+                                      );
+                                    }}
+                                  >
+                                    <option value="" disabled>
+                                      Seleccionar
+                                    </option>
+                                    <option value="__BYE__">Bye</option>
+                                    {effectiveId && !currentExistsInOptions ? (
+                                      <option value={effectiveId}>
+                                        {currentSeedLabel
+                                          ? `${currentSeedLabel} - ${currentLabel}`
+                                          : currentLabel}
+                                      </option>
+                                    ) : null}
+                                    {selectableRegistrationIds.map((id) => {
+                                      const registration = registrationMap.get(id);
+                                      const label = formatTeamName(registration);
+                                      const seedLabel = labelByRegistration.get(id);
+                                      const isOccupied =
+                                        occupiedRegistrationIds.has(id) &&
+                                        id !== currentId;
+                                      return (
+                                        <option key={id} value={id}>
+                                          {seedLabel
+                                            ? `${seedLabel} - ${label}`
+                                            : label}
+                                          {isOccupied ? " (ocupado)" : ""}
+                                        </option>
+                                      );
+                                    })}
+                                  </select>
+                                </div>
+                              );
+                            }
+
+                            if (displayId) {
+                              const registration = registrationMap.get(displayId);
+                              const label = formatTeamName(registration);
+                              const seedLabel = labelByRegistration.get(displayId);
+                              return (
+                                <div className="simple-bracket-side">
+                                  {seedLabel ? `${seedLabel} ` : ""}
+                                  {label}
+                                </div>
+                              );
+                            }
+
+                            if (round.roundIndex === 0) {
+                              return (
+                                <div className="simple-bracket-side">
+                                  {hasOpponent ? "Bye" : "Disponible"}
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div className="simple-bracket-side">Por definir</div>
+                            );
+                          };
+
+                          return (
+                            <div
+                              key={match.matchId ?? match.order}
+                              className="simple-bracket-match"
+                              style={{ top, height: matchHeight }}
+                            >
+                              <div className="simple-bracket-meta">
+                                {round.name}
+                              </div>
+                              {renderSide(
+                                match.rawSides ? match.rawSides[0] : undefined,
+                                "A",
+                                hasTeamB,
+                                displayA
+                              )}
+                              {renderSide(
+                                match.rawSides ? match.rawSides[1] : undefined,
+                                "B",
+                                hasTeamA,
+                                displayB
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                  {renderBronze()}
+                </div>
+              );
+            })()}
+          </div>
+        )}
+      </div>
     </>
   );
 };

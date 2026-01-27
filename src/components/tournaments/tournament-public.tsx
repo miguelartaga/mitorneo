@@ -1,10 +1,9 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { BracketCanvas } from "@/components/tournaments/bracket-canvas";
 import TournamentPublicFixture from "@/components/tournaments/tournament-public-fixture";
-import TournamentPublicInfo from "@/components/tournaments/tournament-public-info";
-import TournamentPublicParticipants from "@/components/tournaments/tournament-public-participants";
 import {
   computeTournamentStandingsByCategory,
   type TournamentRankingData,
@@ -33,6 +32,8 @@ type TabKey =
   | "results"
   | "prizes"
   | "contact";
+
+const playoffDrawTypes = new Set(["PLAYOFF", "GROUPS_PLAYOFF"]);
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "info", label: "Info" },
@@ -215,7 +216,8 @@ const teamLabel = (registration?: Registration | null) => {
   return names.join(" / ");
 };
 
-const teamMembersLabel = (registration: Registration) => {
+const teamMembersLabel = (registration?: Registration | null) => {
+  if (!registration) return "";
   const members = [registration.player, registration.partner, registration.partnerTwo].filter(
     Boolean
   ) as Player[];
@@ -240,6 +242,9 @@ export default function TournamentPublic({
   const [themeMode, setThemeMode] = useState<"light" | "dark">("light");
   const [participantQuery, setParticipantQuery] = useState("");
   const [participantDraft, setParticipantDraft] = useState("");
+  const [fixtureQuery, setFixtureQuery] = useState("");
+  const [fixtureCategory, setFixtureCategory] = useState("all");
+  const [fixtureTime, setFixtureTime] = useState("");
   const [matches, setMatches] = useState<Match[]>(tournament.matches);
   const [matchesError, setMatchesError] = useState<string | null>(null);
   const [expandedTeams, setExpandedTeams] = useState<Set<string>>(new Set());
@@ -332,11 +337,24 @@ export default function TournamentPublic({
     return map;
   }, [tournament.categories]);
 
+  const categoryOptions = useMemo(() => {
+    const list = Array.from(categoriesById.values());
+    list.sort((a, b) => a.name.localeCompare(b.name));
+    return list;
+  }, [categoriesById]);
+
   const getMatchCategory = (match: Match) =>
     categoriesById.get(match.categoryId) ??
     tournament.categories.find((entry) => entry.categoryId === match.categoryId)
       ?.category ??
     null;
+
+  const normalizeText = (value: string) =>
+    value
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
 
   const categoryDrawTypeById = useMemo(() => {
     const map = new Map<string, string | null>();
@@ -557,19 +575,48 @@ export default function TournamentPublic({
   }, [standingsByCategory, categoriesById, tournament.categories]);
 
   const playoffBrackets = useMemo(() => {
-    const map = new Map<string, { category: Category; matches: Match[] }>();
+    const map = new Map<
+      string,
+      { category: Category; matches: Match[]; bronzeMatches: Match[] }
+    >();
     matches
-      .filter((match) => match.stage === "PLAYOFF" && !match.isBronzeMatch)
+      .filter((match) => match.stage === "PLAYOFF")
       .forEach((match) => {
         const category =
           categoriesById.get(match.categoryId) ??
           tournament.categories.find((entry) => entry.categoryId === match.categoryId)
             ?.category;
         if (!category) return;
-        const entry = map.get(match.categoryId) ?? { category, matches: [] };
-        entry.matches.push(match);
+        const drawType =
+          categoryDrawTypeById.get(match.categoryId) ??
+          tournament.categories.find((entry) => entry.categoryId === match.categoryId)
+            ?.drawType ??
+          null;
+        if (!drawType || !playoffDrawTypes.has(drawType)) return;
+        const entry =
+          map.get(match.categoryId) ?? { category, matches: [], bronzeMatches: [] };
+        if (match.isBronzeMatch) {
+          entry.bronzeMatches.push(match);
+        } else {
+          entry.matches.push(match);
+        }
         map.set(match.categoryId, entry);
       });
+
+    const deriveBracketSizeFromMatches = (matches: Match[]) => {
+      if (matches.length === 0) return undefined;
+      const roundCounts = new Map<number, number>();
+      matches.forEach((match) => {
+        const round = match.roundNumber ?? 1;
+        roundCounts.set(round, (roundCounts.get(round) ?? 0) + 1);
+      });
+      let maxSize = 0;
+      roundCounts.forEach((count, round) => {
+        const size = count * 2 ** Math.max(0, round - 1);
+        if (size > maxSize) maxSize = size;
+      });
+      return maxSize > 1 ? maxSize : undefined;
+    };
 
     return Array.from(map.values()).map((entry) => {
       const drawType = categoryDrawTypeById.get(entry.category.id) ?? null;
@@ -592,12 +639,7 @@ export default function TournamentPublic({
             .filter((round) => typeof round === "number")
         )
       ).sort((a, b) => a - b);
-      const firstRound = roundNumbers[0] ?? 1;
-      const firstRoundMatches = bracketMatches.filter(
-        (match) => (match.roundNumber ?? 1) === firstRound
-      );
-      const bracketSize =
-        firstRoundMatches.length > 0 ? firstRoundMatches.length * 2 : undefined;
+      const bracketSize = deriveBracketSizeFromMatches(bracketMatches);
       const matchStatusByMatchId = new Map<string, string>();
       bracketMatches.forEach((match) => {
         const score = formatMatchScore(match, getMatchCategory(match));
@@ -608,6 +650,7 @@ export default function TournamentPublic({
       return {
         category: entry.category,
         matches: bracketMatches,
+        bronzeMatches: entry.bronzeMatches,
         roundNumbers,
         bracketSize,
         matchStatusByMatchId,
@@ -633,7 +676,51 @@ export default function TournamentPublic({
     return map;
   }, [playoffBrackets]);
 
+  const fixtureMatches = useMemo(() => {
+    const query = normalizeText(fixtureQuery);
+    const timeFilter = fixtureTime.trim();
+    const categoryFilter = fixtureCategory !== "all" ? fixtureCategory : null;
 
+    return matches.filter((match) => {
+      if (categoryFilter && match.categoryId !== categoryFilter) return false;
+      if (timeFilter && !(match.startTime ?? "").startsWith(timeFilter)) {
+        return false;
+      }
+      if (!query) return true;
+      const category = getMatchCategory(match);
+      const safePlayoffLabel = match.stage === "PLAYOFF"
+        ? match.isBronzeMatch
+          ? "Bronce"
+          : "Playoff"
+        : match.groupName ?? "";
+      const textParts = [
+        category?.name ?? "",
+        category?.abbreviation ?? "",
+        teamLabel(match.teamA),
+        teamMembersLabel(match.teamA),
+        teamLabel(match.teamB),
+        teamMembersLabel(match.teamB),
+        match.groupName ?? "",
+        safePlayoffLabel,
+        match.startTime ?? "",
+      ];
+      const haystack = normalizeText(textParts.join(" "));
+      return haystack.includes(query);
+    });
+  }, [matches, fixtureQuery, fixtureCategory, fixtureTime]);
+
+  const fixtureMatchesByDate = useMemo(() => {
+    const map = new Map<string, Match[]>();
+    fixtureMatches.forEach((match) => {
+      const dateKey = match.scheduledDate
+        ? match.scheduledDate.split("T")[0]
+        : "sin-fecha";
+      const list = map.get(dateKey) ?? [];
+      list.push(match);
+      map.set(dateKey, list);
+    });
+    return map;
+  }, [fixtureMatches]);
 
   const resultMatches = useMemo(
     () =>
@@ -814,19 +901,208 @@ export default function TournamentPublic({
         </div>
 
         {tab === "info" && (
-          <TournamentPublicInfo
-            tournament={tournament}
-            formatDateLong={formatDateLong}
-            formatDateShort={formatDateShort}
-          />
+          <section className="mt-8">
+            <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
+              <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                <h2 className="text-lg font-semibold text-slate-900">Reglas</h2>
+                {tournament.rulesText ? (
+                  <div
+                    className="rules-content ql-editor mt-4"
+                    dangerouslySetInnerHTML={{ __html: tournament.rulesText }}
+                  />
+                ) : (
+                  <p className="mt-4 text-sm text-slate-500">
+                    Sin reglas publicadas.
+                  </p>
+                )}
+              </div>
+              <div className="space-y-6">
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                  <h2 className="text-lg font-semibold text-slate-900">Fechas clave</h2>
+                  <div className="mt-4 space-y-3 text-sm text-slate-500">
+                    <p>Inicio: {formatDateLong(tournament.startDate)}</p>
+                    <p>Fin: {formatDateLong(tournament.endDate)}</p>
+                    <p>
+                      Cierre inscripciones: {formatDateLong(tournament.registrationDeadline)}
+                    </p>
+                    <div>
+                      <p className="mt-4 font-semibold text-slate-900">Dias de juego</p>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {tournament.playDays.map((day) => (
+                          <span
+                            key={day}
+                            className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 text-xs text-slate-600"
+                          >
+                            {formatDateShort(day)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                  <h2 className="text-lg font-semibold text-slate-900">Sedes</h2>
+                  <div className="mt-4 space-y-3 text-sm text-slate-500">
+                    {tournament.clubs.map((club) => (
+                      <div
+                        key={club.id}
+                        className="rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3"
+                      >
+                        <p className="font-semibold text-slate-900">{club.name}</p>
+                        <p>{club.address ?? "Sin direccion"}</p>
+                        <p className="text-xs text-slate-500">
+                          Canchas habilitadas: {club.courtsCount ?? 1}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+                  <h2 className="text-lg font-semibold text-slate-900">
+                    Categorias disponibles
+                  </h2>
+                  <div className="mt-4 space-y-3 text-sm">
+                    {tournament.categories.map((entry) => (
+                      <div
+                        key={entry.categoryId}
+                        className="flex flex-col gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                      >
+                        <div>
+                          <p className="font-semibold text-slate-900">
+                            {entry.category.name}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {entry.category.abbreviation} - {entry.category.sport?.name ?? "N/D"}
+                          </p>
+                        </div>
+                        <div className="text-xs text-slate-500">
+                          <p>Precio 1: Bs {entry.price}</p>
+                          <p>Precio 2+: Bs {entry.secondaryPrice || entry.price}</p>
+                          <p>Precio hermano: Bs {entry.siblingPrice || entry.price}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
         )}
 
-        {tab === "participants" && (
-          <TournamentPublicParticipants
-            participantQuery={participantQuery}
-            setParticipantQuery={setParticipantQuery}
-            filteredParticipantRows={filteredParticipantRows}
-          />
+{tab === "participants" && (
+          <section className="mt-8 space-y-6">
+            <div className="flex flex-wrap items-center gap-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
+              <div className="flex-1">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                  Filtrar participantes
+                </p>
+                <input
+                  type="text"
+                  value={participantDraft}
+                  onChange={(e) => setParticipantDraft(e.target.value)}
+                  placeholder="Equipo, jugador, ciudad o pais"
+                  className="mt-2 w-full rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-2 text-sm text-slate-100 placeholder:text-slate-400 focus:border-cyan-300 focus:outline-none"
+                />
+              </div>
+              <div className="flex items-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setParticipantQuery(participantDraft)}
+                  className="rounded-full bg-cyan-400/90 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-900"
+                >
+                  Filtrar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setParticipantDraft("");
+                    setParticipantQuery("");
+                  }}
+                  className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-600"
+                >
+                  Limpiar
+                </button>
+              </div>
+            </div>
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-900">
+                    Participantes inscritos
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    {filteredParticipantRows.length} jugadores encontrados
+                  </p>
+                </div>
+              </div>
+              {filteredParticipantRows.length === 0 ? (
+                <p className="mt-4 text-sm text-slate-500">Sin inscritos.</p>
+              ) : (
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  {filteredParticipantRows.map((row) => (
+                    <div
+                      key={row.id}
+                      className="flex gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3 text-sm"
+                    >
+                      <div className="h-14 w-14 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-2)]">
+                        {row.player.photoUrl ? (
+                          <img
+                            src={row.player.photoUrl}
+                            alt={row.player.firstName}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center bg-[var(--surface-2)] text-slate-400">
+                            <svg
+                              aria-hidden="true"
+                              viewBox="0 0 64 64"
+                              className="h-10 w-10"
+                              fill="none"
+                            >
+                              <circle
+                                cx="32"
+                                cy="24"
+                                r="12"
+                                stroke="currentColor"
+                                strokeWidth="3"
+                              />
+                              <path
+                                d="M12 56c2-10 12-18 20-18s18 8 20 18"
+                                stroke="currentColor"
+                                strokeWidth="3"
+                                strokeLinecap="round"
+                              />
+                            </svg>
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-900">
+                          <Link
+                            href={`/players/${row.player.id}`}
+                            className="text-cyan-600 underline-offset-2 hover:text-cyan-700 hover:underline"
+                          >
+                            {row.player.firstName} {row.player.lastName}
+                          </Link>
+                        </p>
+                        <p className="mt-1 text-xs text-cyan-600">
+                          {row.category.name} ({row.category.abbreviation})
+                        </p>
+                        {row.teamName && (
+                          <p className="mt-1 text-xs text-slate-500">
+                            Equipo: {row.teamName}
+                          </p>
+                        )}
+                        <p className="mt-1 text-xs text-slate-500">
+                          {row.location || "Sin ubicacion"}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
         )}
 
         {tab === "groups" && (
@@ -904,14 +1180,203 @@ export default function TournamentPublic({
                 {matchesError}
               </p>
             )}
-            <TournamentPublicFixture
-              matches={matches}
-              categoriesById={categoriesById}
-              categoryDrawTypeById={categoryDrawTypeById}
-              groupStageCompleteByCategory={groupStageCompleteByCategory}
-              bracketSizeByCategory={bracketSizeByCategory}
-              playoffRoundsByCategory={playoffRoundsByCategory}
-            />
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
+              <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_160px]">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                    Buscar jugador / equipo
+                  </label>
+                  <input
+                    value={fixtureQuery}
+                    onChange={(e) => setFixtureQuery(e.target.value)}
+                    placeholder="Nombre, equipo, grupo..."
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-200/40"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                    Categoria
+                  </label>
+                  <select
+                    value={fixtureCategory}
+                    onChange={(e) => setFixtureCategory(e.target.value)}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-200/40"
+                  >
+                    <option value="all">Todas</option>
+                    {categoryOptions.map((category) => (
+                      <option key={category.id} value={category.id}>
+                        {category.name} ({category.abbreviation})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                    Hora
+                  </label>
+                  <input
+                    type="time"
+                    value={fixtureTime}
+                    onChange={(e) => setFixtureTime(e.target.value)}
+                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-200/40"
+                  />
+                </div>
+              </div>
+            </div>
+            {Array.from(fixtureMatchesByDate.entries()).map(([dateKey, matches]) => (
+              <div
+                key={`fixture-${dateKey}`}
+                className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6"
+              >
+                <h3 className="text-lg font-semibold text-slate-900">
+                  {dateKey === "sin-fecha"
+                    ? "Sin fecha asignada"
+                    : formatDateLong(dateKey)}
+                </h3>
+                <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--border)]">
+                  <table className="min-w-[900px] text-xs text-slate-600">
+                    <thead className="bg-[var(--surface-2)] uppercase tracking-[0.2em] text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Hora</th>
+                        <th className="px-3 py-2 text-left">Club</th>
+                        <th className="px-3 py-2 text-left">Cancha</th>
+                        <th className="px-3 py-2 text-left">Categoria</th>
+                        <th className="px-3 py-2 text-left">Grupo</th>
+                        <th className="px-3 py-2 text-left">Equipo 1</th>
+                        <th className="px-3 py-2 text-left">VS</th>
+                        <th className="px-3 py-2 text-left">Equipo 2</th>
+                        <th className="px-3 py-2 text-left">Marcador</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/5">
+                      {matches.map((match) => {
+                        const category =
+                          match.category ?? categoriesById.get(match.categoryId);
+                        const score = formatMatchScore(match, getMatchCategory(match));
+                        const isLive = Boolean(match.liveState?.isLive);
+                        const drawType =
+                          categoryDrawTypeById.get(match.categoryId) ?? null;
+                        const isPlayoffWaiting =
+                          match.stage === "PLAYOFF" &&
+                          drawType === "GROUPS_PLAYOFF" &&
+                          !(groupStageCompleteByCategory.get(match.categoryId) ?? false);
+                        const teamAKey = `${match.id}-A`;
+                        const teamBKey = `${match.id}-B`;
+                        const teamAMembers = getTeamMembers(match.teamA);
+                        const teamBMembers = getTeamMembers(match.teamB);
+                        const canExpandTeamA =
+                          teamAMembers.length > 1 ||
+                          (teamAMembers.length > 0 && Boolean(match.teamA?.teamName));
+                        const canExpandTeamB =
+                          teamBMembers.length > 1 ||
+                          (teamBMembers.length > 0 && Boolean(match.teamB?.teamName));
+                        const isTeamAExpanded = expandedTeams.has(teamAKey);
+                        const isTeamBExpanded = expandedTeams.has(teamBKey);
+                        return (
+                          <tr key={match.id} className="bg-[var(--surface)]">
+                            <td className="px-3 py-2">
+                              {match.startTime ?? "N/D"}
+                            </td>
+                            <td className="px-3 py-2">
+                              {match.club?.name ?? "N/D"}
+                            </td>
+                            <td className="px-3 py-2">
+                              {match.courtNumber ?? "-"}
+                            </td>
+                            <td className="px-3 py-2">
+                              {category?.abbreviation ?? "N/D"}
+                            </td>
+                            <td className="px-3 py-2">
+                              {getPlayoffLabel(match)}
+                            </td>
+                            <td className="px-3 py-2 font-semibold text-slate-900">
+                              {isPlayoffWaiting ? (
+                                <span className="text-xs text-slate-400">
+                                  Por definir
+                                </span>
+                              ) : (
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span>{teamLabel(match.teamA)}</span>
+                                    {canExpandTeamA && (
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleTeamExpanded(teamAKey)}
+                                        className="text-[10px] font-semibold text-cyan-600"
+                                        aria-label={
+                                          isTeamAExpanded
+                                            ? "Ocultar jugadores"
+                                            : "Ver jugadores"
+                                        }
+                                      >
+                                        {isTeamAExpanded ? "v" : ">"}
+                                      </button>
+                                    )}
+                                  </div>
+                                  {canExpandTeamA && isTeamAExpanded && (
+                                    <div className="mt-1 text-[11px] text-slate-500">
+                                      {teamAMembers.join(" / ")}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-slate-400">vs</td>
+                            <td className="px-3 py-2 font-semibold text-slate-900">
+                              {isPlayoffWaiting ? (
+                                <span className="text-xs text-slate-400">
+                                  Por definir
+                                </span>
+                              ) : (
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <span>{teamLabel(match.teamB)}</span>
+                                    {canExpandTeamB && (
+                                      <button
+                                        type="button"
+                                        onClick={() => toggleTeamExpanded(teamBKey)}
+                                        className="text-[10px] font-semibold text-cyan-600"
+                                        aria-label={
+                                          isTeamBExpanded
+                                            ? "Ocultar jugadores"
+                                            : "Ver jugadores"
+                                        }
+                                      >
+                                        {isTeamBExpanded ? "v" : ">"}
+                                      </button>
+                                    )}
+                                  </div>
+                                  {canExpandTeamB && isTeamBExpanded && (
+                                    <div className="mt-1 text-[11px] text-slate-500">
+                                      {teamBMembers.join(" / ")}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-slate-500">
+                              <div className="flex items-center gap-2">
+                                {score ?? "-"}
+                                {isLive && (
+                                  <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-rose-200">
+                                    En vivo
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
+            {fixtureMatchesByDate.size === 0 && (
+              <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-slate-500">
+                No se encontraron partidos con esos filtros.
+              </div>
+            )}
           </section>
         )}
 
@@ -984,33 +1449,33 @@ export default function TournamentPublic({
                               </thead>
                               <tbody className="divide-y divide-white/5">
                                 {group.entries.map((entryItem, index) => {
-                                  const registration = registrationById.get(entryItem.id);
-                                  const setsDiff =
-                                    entryItem.setsWon - entryItem.setsLost;
-                                  const pointsDiff =
-                                    entryItem.pointsWon - entryItem.pointsLost;
-                                  return (
-                                    <tr key={entryItem.id}>
-                                      <td className="px-3 py-2 text-blue-600 dark:text-cyan-200">
-                                        {index + 1}
-                                      </td>
-                                      <td className="px-3 py-2 font-semibold text-slate-900">
-                                        {registration ? teamLabel(registration) : "N/D"}
-                                      </td>
-                                      <td className="px-3 py-2">
-                                        {entryItem.matchesWon + entryItem.matchesLost}
-                                      </td>
-                                      <td className="px-3 py-2">{entryItem.matchesWon}</td>
-                                      <td className="px-3 py-2">{entryItem.matchesLost}</td>
-                                      <td className="px-3 py-2">{entryItem.points}</td>
-                                      <td className="px-3 py-2">{entryItem.setsWon}</td>
-                                      <td className="px-3 py-2">{entryItem.setsLost}</td>
-                                      <td className="px-3 py-2">{setsDiff}</td>
-                                      <td className="px-3 py-2">{entryItem.pointsWon}</td>
-                                      <td className="px-3 py-2">{entryItem.pointsLost}</td>
-                                      <td className="px-3 py-2">{pointsDiff}</td>
-                                    </tr>
-                                  );
+                                const registration = registrationById.get(entryItem.id);
+                                const setsDiff =
+                                  entryItem.setsWon - entryItem.setsLost;
+                                const pointsDiff =
+                                  entryItem.pointsWon - entryItem.pointsLost;
+                                return (
+                                  <tr key={entryItem.id}>
+                                    <td className="px-3 py-2 text-cyan-200">
+                                      {index + 1}
+                                    </td>
+                                    <td className="px-3 py-2 font-semibold text-slate-900">
+                                      {teamLabel(registration)}
+                                    </td>
+                                    <td className="px-3 py-2">
+                                      {entryItem.matchesWon + entryItem.matchesLost}
+                                    </td>
+                                    <td className="px-3 py-2">{entryItem.matchesWon}</td>
+                                    <td className="px-3 py-2">{entryItem.matchesLost}</td>
+                                    <td className="px-3 py-2">{entryItem.points}</td>
+                                    <td className="px-3 py-2">{entryItem.setsWon}</td>
+                                    <td className="px-3 py-2">{entryItem.setsLost}</td>
+                                    <td className="px-3 py-2">{setsDiff}</td>
+                                    <td className="px-3 py-2">{entryItem.pointsWon}</td>
+                                    <td className="px-3 py-2">{entryItem.pointsLost}</td>
+                                    <td className="px-3 py-2">{pointsDiff}</td>
+                                  </tr>
+                                );
                                 })}
                               </tbody>
                             </table>
@@ -1018,43 +1483,114 @@ export default function TournamentPublic({
                         </div>
                       ))}
                     </div>
-                    {entry.groups.length === 1 && entry.groups[0].entries.length > 0 && (
-                      <div className="mt-5 rounded-2xl border border-blue-600/20 bg-blue-600/10 p-4 text-xs text-slate-600 dark:border-cyan-400/20 dark:bg-cyan-400/10">
-                        <p className="text-[11px] uppercase tracking-[0.2em] text-blue-600 dark:text-cyan-200">
-                          Posiciones finales
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-3">
-                          {entry.groups[0].entries.slice(0, 3).map((item, idx) => {
-                            const reg = registrationById.get(item.id);
-                            const label = reg ? teamLabel(reg) : "N/D";
-                            return (
-                              <div
-                                key={`${item.id}-podium`}
-                                className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 text-[11px]"
-                              >
-                                {idx + 1}º {label}
-                              </div>
-                            );
-                          })}
-                        </div>
+                  {entry.groups.length === 1 && entry.groups[0].entries.length > 0 && (
+                    <div className="mt-5 rounded-2xl border border-cyan-400/20 bg-cyan-400/10 p-4 text-xs text-slate-600">
+                      <p className="text-[11px] uppercase tracking-[0.2em] text-cyan-200">
+                        Posiciones finales
+                      </p>
+                      <div className="mt-2 flex flex-wrap gap-3">
+                        {entry.groups[0].entries.slice(0, 3).map((item, idx) => {
+                          const reg = registrationById.get(item.id);
+                          return (
+                            <div
+                              key={`${item.id}-podium`}
+                              className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 text-[11px]"
+                            >
+                              {idx + 1}Âº {reg ? teamLabel(reg) : "N/D"}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
-                ))
-              )}
-            </section>
-          )
-        }
-
-        {
-          tab === "bracket" && (
-            <section className="mt-8 space-y-6">
-              {playoffBrackets.length === 0 ? (
-                <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-slate-500">
-                  No hay llaves de playoff para mostrar.
+                  <div className="mt-4">
+                    <BracketCanvas
+                      categoryId={entry.category.id}
+                      matches={entry.matches}
+                      bronzeMatches={entry.bronzeMatches}
+                      roundNumbers={entry.roundNumbers}
+                      bracketSize={entry.bracketSize}
+                      registrationMap={registrationMap}
+                      labelByRegistration={labelByRegistration}
+                      matchStatusByMatchId={entry.matchStatusByMatchId}
+                      className="relative max-h-[80vh] min-h-[480px] overflow-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3"
+                      theme={themeMode}
+                      disableSwap
+                      bracketState="published"
+                    />
+                  </div>
                 </div>
-              ) : (
-                playoffBrackets.map((entry) => (
+              ))
+            )}
+          </section>
+        )}
+
+        {tab === "results" && (
+          <section className="mt-8 space-y-6">
+            {matchesError && (
+              <p className="rounded-2xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                {matchesError}
+              </p>
+            )}
+            {resultMatches.length === 0 ? (
+              <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-slate-500">
+                Aun no hay resultados registrados.
+              </div>
+            ) : (
+              [...resultMatches]
+                .sort((a, b) => {
+                  const aLive = a.liveState?.isLive ? 1 : 0;
+                  const bLive = b.liveState?.isLive ? 1 : 0;
+                  if (aLive !== bLive) return bLive - aLive;
+                  return 0;
+                })
+                .map((match) => {
+                const category =
+                  match.category ?? categoriesById.get(match.categoryId);
+                const score = formatMatchScore(match, getMatchCategory(match));
+                const scoreParts = score ? score.split(" | ") : [];
+                const activeSetIndex =
+                  typeof match.liveState?.activeSet === "number"
+                    ? match.liveState.activeSet
+                    : null;
+                const mainScore =
+                  activeSetIndex !== null && scoreParts[activeSetIndex]
+                    ? scoreParts[activeSetIndex]
+                    : score ?? "N/D";
+                const unitLabel =
+                  tournament.sport?.name?.toLowerCase().includes("fronton")
+                    ? "Cancha"
+                    : "Set";
+                const detailedScore =
+                  activeSetIndex !== null
+                    ? null
+                    : scoreParts.length
+                      ? scoreParts
+                          .map((part, index) => `${unitLabel} ${index + 1}: ${part}`)
+                          .join(" Â· ")
+                      : null;
+                const setLeadLabel =
+                  activeSetIndex !== null && activeSetIndex > 0
+                    ? (() => {
+                        let aWins = 0;
+                        let bWins = 0;
+                        for (let i = 0; i < activeSetIndex; i += 1) {
+                          const part = scoreParts[i];
+                          if (!part) continue;
+                          const [aRaw, bRaw] = part.split("-");
+                          const aVal = Number(aRaw);
+                          const bVal = Number(bRaw);
+                          if (!Number.isFinite(aVal) || !Number.isFinite(bVal)) continue;
+                          if (aVal > bVal) aWins += 1;
+                          if (bVal > aVal) bWins += 1;
+                        }
+                        const label = unitLabel === "Cancha" ? "Cancha a favor" : "Set a favor";
+                        return `${label} ${aWins}-${bWins}`;
+                      })()
+                    : null;
+                const isLive = Boolean(match.liveState?.isLive);
+                const isFinished = isMatchComplete(match);
+                return (
                   <div
                     key={`bracket-${entry.category.id}`}
                     className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6"
@@ -1097,149 +1633,19 @@ export default function TournamentPublic({
                 <p className="rounded-2xl border border-rose-400/40 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
                   {matchesError}
                 </p>
-              )}
-              {resultMatches.length === 0 ? (
-                <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-slate-500">
-                  Aun no hay resultados registrados.
-                </div>
-              ) : (
-                [...resultMatches]
-                  .sort((a, b) => {
-                    const aLive = a.liveState?.isLive ? 1 : 0;
-                    const bLive = b.liveState?.isLive ? 1 : 0;
-                    if (aLive !== bLive) return bLive - aLive;
-                    return 0;
-                  })
-                  .map((match) => {
-                    const category =
-                      match.category ?? categoriesById.get(match.categoryId);
-                    const score = formatMatchScore(match, getMatchCategory(match));
-                    const scoreParts = score ? score.split(" | ") : [];
-                    const activeSetIndex =
-                      typeof match.liveState?.activeSet === "number"
-                        ? match.liveState.activeSet
-                        : null;
-                    const mainScore =
-                      activeSetIndex !== null && scoreParts[activeSetIndex]
-                        ? scoreParts[activeSetIndex]
-                        : score ?? "N/D";
-                    const unitLabel =
-                      tournament.sport?.name?.toLowerCase().includes("fronton")
-                        ? "Cancha"
-                        : "Set";
-                    const detailedScore =
-                      activeSetIndex !== null
-                        ? null
-                        : scoreParts.length
-                          ? scoreParts
-                            .map((part, index) => `${unitLabel} ${index + 1}: ${part}`)
-                            .join(" · ")
-                          : null;
-                    const setLeadLabel =
-                      activeSetIndex !== null && activeSetIndex > 0
-                        ? (() => {
-                          let aWins = 0;
-                          let bWins = 0;
-                          for (let i = 0; i < activeSetIndex; i += 1) {
-                            const part = scoreParts[i];
-                            if (!part) continue;
-                            const [aRaw, bRaw] = part.split("-");
-                            const aVal = Number(aRaw);
-                            const bVal = Number(bRaw);
-                            if (!Number.isFinite(aVal) || !Number.isFinite(bVal)) continue;
-                            if (aVal > bVal) aWins += 1;
-                            if (bVal > aVal) bWins += 1;
-                          }
-                          const label = unitLabel === "Cancha" ? "Cancha a favor" : "Set a favor";
-                          return `${label} ${aWins}-${bWins}`;
-                        })()
-                        : null;
-                    const isLive = Boolean(match.liveState?.isLive);
-                    const isFinished = isMatchComplete(match);
-                    return (
-                      <div
-                        key={`result-${match.id}`}
-                        className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6"
-                      >
-                        <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
-                          <div>
-                            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">
-                              {category?.name ?? "Categoria"}
-                            </p>
-                            {isLive && (
-                              <div className="mt-2">
-                                <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-rose-200">
-                                  En vivo
-                                </span>
-                              </div>
-                            )}
-                            {!isLive && isFinished && (
-                              <div className="mt-2">
-                                <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-200">
-                                  Partido terminado
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                          <div className="text-right text-xs text-slate-500">
-                            <p>{match.startTime ?? "N/D"}</p>
-                            <p>{formatDateShort(match.scheduledDate)}</p>
-                          </div>
-                        </div>
-                        <div className="mt-4">
-                          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] p-4">
-                            <div className="grid items-center gap-4 sm:grid-cols-[1fr_auto_1fr]">
-                              <div className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-                                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">
-                                  Equipo 1
-                                </p>
-                                <p className="mt-2 truncate text-lg font-semibold text-slate-900">
-                                  {teamLabel(match.teamA)}
-                                </p>
-                              </div>
-                              <div className="flex flex-col items-center justify-center gap-2 rounded-2xl border border-indigo-400/30 bg-[var(--surface)] px-6 py-4 text-center shadow-[0_10px_30px_-20px_rgba(15,23,42,0.6)]">
-                                <span className="text-[11px] font-semibold uppercase tracking-[0.35em] text-slate-500">
-                                  Marcador
-                                </span>
-                                <span className="text-4xl font-bold text-slate-900">
-                                  {mainScore}
-                                </span>
-                                {setLeadLabel && (
-                                  <span className="text-xs font-semibold text-slate-500">
-                                    {setLeadLabel}
-                                  </span>
-                                )}
-                                {!setLeadLabel && detailedScore && (
-                                  <span className="text-xs font-semibold text-slate-500">
-                                    {detailedScore}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="min-w-0 rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-right">
-                                <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">
-                                  Equipo 2
-                                </p>
-                                <p className="mt-2 truncate text-lg font-semibold text-slate-900">
-                                  {teamLabel(match.teamB)}
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                          {match.outcomeType && match.outcomeType !== "PLAYED" && (
-                            <span className="rounded-full bg-amber-400/20 px-3 py-1 text-xs text-amber-200">
-                              {match.outcomeType === "WALKOVER"
-                                ? "Walkover"
-                                : "Lesion"}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })
-              )}
-            </section>
-          )
-        }
+                <p>Correo: {tournament.owner?.email ?? "Sin correo"}</p>
+                <p>Direccion: {tournament.address ?? "Sin direccion"}</p>
+              </div>
+            </div>
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+              <h2 className="text-lg font-semibold text-slate-900">Ubicacion</h2>
+              <p className="mt-4 text-sm text-slate-500">
+                Consulta las sedes y horarios en la pestaÃ±a de tiempos.
+              </p>
+            </div>
+          </section>
+        )}
+      </div>
 
         {
           tab === "prizes" && (
@@ -1334,3 +1740,5 @@ export default function TournamentPublic({
     </main >
   );
 }
+
+

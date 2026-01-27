@@ -1,6 +1,11 @@
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "@/lib/auth";
 import { canManageTournament } from "@/lib/permissions";
+import {
+  assertNoDuplicateEntrants,
+  buildGroupPlayoffSlotEntrants,
+  normalizeByesToEnd,
+} from "@/lib/playoff-utils";
 import { NextResponse } from "next/server";
 
 const DEFAULT_TIEBREAKERS = [
@@ -42,7 +47,10 @@ const resolveId = (request: Request, resolvedParams?: { id?: string }) => {
   return parts.length ? parts[parts.length - 3] : undefined;
 };
 
-const normalizeGroupName = (value?: string | null) => value?.trim() || "A";
+const normalizeGroupName = (value?: string | null) => {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : "_UNGROUPED";
+};
 
 const normalizeTiebreakerOrder = (value: unknown) => {
   if (!Array.isArray(value)) return [...DEFAULT_TIEBREAKERS];
@@ -262,6 +270,7 @@ const buildGroupStandings = (
 type BracketSlot = { id: string } | null;
 type RoundEntry = {
   roundNumber: number;
+  orderHint?: number;
   teamAId: string | null;
   teamBId: string | null;
 };
@@ -273,18 +282,41 @@ const resolveByeWinner = (entry: RoundEntry | undefined) => {
   return null;
 };
 
+const buildSeedOrder = (bracketSize: number) => {
+  if (bracketSize <= 1) return [1];
+  if (bracketSize === 2) return [1, 2];
+  const half = Math.floor(bracketSize / 2);
+  const previous = buildSeedOrder(half);
+  const order: number[] = [];
+  previous.forEach((seed, index) => {
+    const mirror = bracketSize + 1 - seed;
+    if (index % 2 === 0) {
+      order.push(seed, mirror);
+    } else {
+      order.push(mirror, seed);
+    }
+  });
+  return order;
+};
+
 const buildRoundOneEntries = (slots: BracketSlot[]): RoundEntry[] => {
   const bracketSize = slots.length;
   if (bracketSize === 0) return [];
+  const seedOrder = buildSeedOrder(bracketSize);
   const matchesCount = Math.max(1, bracketSize / 2);
-  return Array.from({ length: matchesCount }, (_, index) => {
-    const opponentIndex = bracketSize - 1 - index;
-    return {
+  const entries: RoundEntry[] = [];
+  for (let index = 0; index < matchesCount; index += 1) {
+    const seedA = seedOrder[index * 2] ?? 0;
+    const seedB = seedOrder[index * 2 + 1] ?? 0;
+    const slotA = seedA > 0 ? slots[seedA - 1] : null;
+    const slotB = seedB > 0 ? slots[seedB - 1] : null;
+    entries.push({
       roundNumber: 1,
-      teamAId: slots[index]?.id ?? null,
-      teamBId: slots[opponentIndex]?.id ?? null,
-    };
-  });
+      teamAId: slotA?.id ?? null,
+      teamBId: slotB?.id ?? null,
+    });
+  }
+  return entries;
 };
 
 const buildBracketMatchesTemplate = (
@@ -295,8 +327,9 @@ const buildBracketMatchesTemplate = (
   const totalRounds = Math.max(1, Math.floor(Math.log2(bracketSize)));
   const rounds: RoundEntry[][] = [];
   rounds.push(
-    roundOneEntries.map((entry) => ({
+    roundOneEntries.map((entry, index) => ({
       roundNumber: 1,
+      orderHint: typeof entry.orderHint === "number" ? entry.orderHint : index,
       teamAId: entry.teamAId,
       teamBId: entry.teamBId,
     }))
@@ -312,6 +345,7 @@ const buildBracketMatchesTemplate = (
       const isImmediateFromRoundOne = round === 2;
       current.push({
         roundNumber: round,
+        orderHint: index,
         teamAId: isImmediateFromRoundOne ? resolveByeWinner(left) : null,
         teamBId: isImmediateFromRoundOne ? resolveByeWinner(right) : null,
       });
@@ -320,6 +354,63 @@ const buildBracketMatchesTemplate = (
   }
 
   return rounds.flat();
+};
+
+const logBracketSlots = (
+  label: string,
+  slots: Array<{ id: string; groupName?: string } | null>
+) => {
+  const qualifiers = slots.filter(Boolean).length;
+  const byes = slots.length - qualifiers;
+  console.log(
+    `[playoffs] ${label} bracketSize=${slots.length} qualifiers=${qualifiers} byes=${byes}`
+  );
+  console.table(
+    slots.map((slot, index) => ({
+      index,
+      id: slot?.id ?? "BYE",
+      groupName: slot?.groupName ?? (slot ? "N/A" : "BYE"),
+    }))
+  );
+};
+
+type EnsurePlayoffSlotsParams = {
+  tournamentId: string;
+  categoryId: string;
+  bracketSize: number;
+  entrants: (string | null)[];
+  regenerate: boolean;
+};
+
+const ensurePlayoffSlots = async ({
+  tournamentId,
+  categoryId,
+  bracketSize,
+  entrants,
+  regenerate,
+}: EnsurePlayoffSlotsParams) => {
+  const existingCount = await prisma.playoffSlot.count({
+    where: { tournamentId, categoryId },
+  });
+  if (existingCount > 0 && !regenerate) {
+    return false;
+  }
+  if (existingCount > 0) {
+    await prisma.playoffSlot.deleteMany({
+      where: { tournamentId, categoryId },
+    });
+  }
+  if (bracketSize <= 0) {
+    return true;
+  }
+  const data = Array.from({ length: bracketSize }, (_, index) => ({
+    tournamentId,
+    categoryId,
+    position: index + 1,
+    entrantId: entrants[index] ?? null,
+  }));
+  await prisma.playoffSlot.createMany({ data });
+  return true;
 };
 
 const collectOrderedGroupQualifiers = (
@@ -437,6 +528,12 @@ export async function POST(
   const categoryId =
     typeof body?.categoryId === "string" ? body.categoryId : null;
   const regenerate = body?.regenerate === true;
+  if (regenerate && !categoryId) {
+    return NextResponse.json(
+      { error: "Regenerar requiere una categoria especifica" },
+      { status: 400 }
+    );
+  }
 
   const tournamentCategories = await prisma.tournamentCategory.findMany({
     where: { tournamentId },
@@ -445,6 +542,7 @@ export async function POST(
       drawType: true,
       groupQualifiers: true,
       hasBronzeMatch: true,
+      playoffStatus: true,
       category: { select: { name: true } },
     },
   });
@@ -544,20 +642,60 @@ export async function POST(
     isBronzeMatch?: boolean;
   }> = [];
 
-  const deleteCategoryIds: string[] = [];
+  const deleteMatchCategoryIds: string[] = [];
 
-  playableCategories.forEach((category) => {
-    if (existingByCategory.has(category.categoryId) && !regenerate) return;
-    if (existingByCategory.has(category.categoryId) && regenerate) {
-      deleteCategoryIds.push(category.categoryId);
+  if (!regenerate) {
+    const lockedCategory = playableCategories.find(
+      (item) =>
+        (!categoryId || item.categoryId === categoryId) &&
+        (item.playoffStatus === "LOCKED" ||
+          item.playoffStatus === "PUBLISHED")
+    );
+    if (lockedCategory) {
+      return NextResponse.json(
+        { error: "Las llaves de esa categoría están bloqueadas" },
+        { status: 409 }
+      );
+    }
+  }
+
+  for (const category of playableCategories) {
+    const hasMatches = existingByCategory.has(category.categoryId);
+    const slotsCount = await prisma.playoffSlot.count({
+      where: { tournamentId, categoryId: category.categoryId },
+    });
+    const needSlots = slotsCount === 0;
+    if (hasMatches && !regenerate && !needSlots) {
+      continue;
+    }
+    const shouldUseExistingSlots = regenerate && slotsCount > 0;
+    if (hasMatches && regenerate) {
+      deleteMatchCategoryIds.push(category.categoryId);
     }
 
     const categoryRegistrations = registrations.filter(
       (registration) => registration.categoryId === category.categoryId
     );
-    if (categoryRegistrations.length < 2) return;
+    if (categoryRegistrations.length < 2) continue;
 
-    if (category.drawType === "GROUPS_PLAYOFF") {
+    let bracketMatches: RoundEntry[] = [];
+    let slotEntrants: (string | null)[];
+    let bracketSize = 0;
+
+    if (shouldUseExistingSlots) {
+      const existingSlots = await prisma.playoffSlot.findMany({
+        where: { tournamentId, categoryId: category.categoryId },
+        orderBy: { position: "asc" },
+        select: { entrantId: true },
+      });
+      slotEntrants = existingSlots.map((slot) => slot.entrantId ?? null);
+      bracketSize = slotEntrants.length;
+      const normalizedSlots = slotEntrants.map((id) => (id ? { id } : null));
+      bracketMatches = buildBracketMatchesTemplate(
+        bracketSize,
+        buildRoundOneEntries(normalizedSlots)
+      );
+    } else if (category.drawType === "GROUPS_PLAYOFF") {
       const categoryMatches = groupMatches.filter(
         (match) => match.categoryId === category.categoryId
       );
@@ -586,86 +724,92 @@ export async function POST(
         defaultQualifiers,
         groupPointsConfig
       );
-      if (qualifiers.length < 2) return;
-      const bracketSize = nextPowerOfTwo(qualifiers.length);
-      const slots: Array<BracketSlot> = Array.from(
-        { length: bracketSize },
-        (_, index) => qualifiers[index] ?? null
-      );
-      const roundOneEntries = buildRoundOneEntries(slots);
-      const bracketMatches = buildBracketMatchesTemplate(
+      if (qualifiers.length < 2) continue;
+      bracketSize = nextPowerOfTwo(qualifiers.length);
+      const { slotEntrants: rawSlots } = buildGroupPlayoffSlotEntrants({
+        groups: standingsByGroup,
+        qualifiersByGroup,
+        defaultQualifiers,
         bracketSize,
-        roundOneEntries
+      });
+      const normalizedSlots = normalizeByesToEnd(rawSlots);
+      assertNoDuplicateEntrants(normalizedSlots);
+      logBracketSlots(`category ${category.categoryId}`, normalizedSlots);
+      slotEntrants = normalizedSlots.map((slot) => slot?.id ?? null);
+      if (!hasMatches || regenerate) {
+        const roundOneEntries = buildRoundOneEntries(normalizedSlots);
+        bracketMatches = buildBracketMatchesTemplate(bracketSize, roundOneEntries);
+      }
+    } else {
+      const ordered = orderRegistrations(
+        categoryRegistrations.map((registration) => ({
+          id: registration.id,
+          seed: registration.seed ?? null,
+          rankingNumber: registration.rankingNumber ?? null,
+          createdAt: registration.createdAt,
+        }))
       );
-      bracketMatches.forEach((match) => {
+      if (ordered.length < 2) continue;
+      bracketSize = nextPowerOfTwo(ordered.length);
+      const rawSlots: Array<BracketSlot> = Array.from(
+        { length: bracketSize },
+        (_, index) => ordered[index] ?? null
+      );
+      const normalizedSlots = normalizeByesToEnd(rawSlots);
+      assertNoDuplicateEntrants(normalizedSlots);
+      logBracketSlots(`category ${category.categoryId}`, normalizedSlots);
+      slotEntrants = normalizedSlots.map((slot) => slot?.id ?? null);
+      if (!hasMatches || regenerate) {
+        const roundOneEntries = buildRoundOneEntries(normalizedSlots);
+        bracketMatches = buildBracketMatchesTemplate(bracketSize, roundOneEntries);
+      }
+    }
+
+    if (slotEntrants.length === 0) continue;
+
+    const shouldEnsureSlots = needSlots;
+    const slotsEnsured =
+      slotEntrants.length > 0
+        ? await ensurePlayoffSlots({
+            tournamentId,
+            categoryId: category.categoryId,
+            bracketSize: slotEntrants.length,
+            entrants: slotEntrants,
+            regenerate: shouldEnsureSlots,
+          })
+        : false;
+    if (slotsEnsured) {
+      await prisma.tournamentCategory.update({
+        where: {
+          tournamentId_categoryId: {
+            tournamentId,
+            categoryId: category.categoryId,
+          },
+        },
+        data: {
+          playoffStatus: "DRAFT",
+        },
+      });
+    }
+
+    if (!hasMatches || regenerate) {
+      for (const match of bracketMatches) {
         createEntries.push({
           tournamentId,
           categoryId: category.categoryId,
           groupName: null,
           stage: "PLAYOFF",
           roundNumber: match.roundNumber,
+          orderHint: match.orderHint ?? null,
           teamAId: match.teamAId,
           teamBId: match.teamBId,
         });
-      });
-      if (
-        category.hasBronzeMatch &&
-        qualifiers.length >= 4 &&
-        bracketMatches.length > 0
-      ) {
-        const finalRound = bracketMatches.reduce(
-          (max, current) => Math.max(max, current.roundNumber ?? 1),
-          0
-        );
-        if (finalRound >= 2) {
-          createEntries.push({
-            tournamentId,
-            categoryId: category.categoryId,
-            groupName: null,
-            stage: "PLAYOFF",
-            roundNumber: finalRound + 1,
-            teamAId: null,
-            teamBId: null,
-            isBronzeMatch: true,
-          });
-        }
       }
-      return;
     }
 
-    const ordered = orderRegistrations(
-      categoryRegistrations.map((registration) => ({
-        id: registration.id,
-        seed: registration.seed ?? null,
-        rankingNumber: registration.rankingNumber ?? null,
-        createdAt: registration.createdAt,
-      }))
-    );
-    if (ordered.length < 2) return;
-    const bracketSize = nextPowerOfTwo(ordered.length);
-    const slots: Array<BracketSlot> = Array.from(
-      { length: bracketSize },
-      (_, index) => ordered[index] ?? null
-    );
-    const roundOneEntries = buildRoundOneEntries(slots);
-    const bracketMatches = buildBracketMatchesTemplate(
-      bracketSize,
-      roundOneEntries
-    );
-    bracketMatches.forEach((match) => {
-      createEntries.push({
-        tournamentId,
-        categoryId: category.categoryId,
-        groupName: null,
-        stage: "PLAYOFF",
-        roundNumber: match.roundNumber,
-        teamAId: match.teamAId,
-        teamBId: match.teamBId,
-      });
-    });
     if (
       category.hasBronzeMatch &&
-      ordered.length >= 4 &&
+      slotEntrants.filter(Boolean).length >= 4 &&
       bracketMatches.length > 0
     ) {
       const finalRound = bracketMatches.reduce(
@@ -685,14 +829,14 @@ export async function POST(
         });
       }
     }
-  });
+  }
 
-  if (deleteCategoryIds.length > 0) {
+  if (deleteMatchCategoryIds.length > 0) {
     await prisma.tournamentMatch.deleteMany({
       where: {
         tournamentId,
         stage: "PLAYOFF",
-        categoryId: { in: deleteCategoryIds },
+        categoryId: { in: deleteMatchCategoryIds },
       },
     });
   }

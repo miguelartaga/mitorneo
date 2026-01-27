@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import type { Prisma } from "@prisma/client";
 import { getServerSession } from "@/lib/auth";
 import { canManageTournament } from "@/lib/permissions";
 import { NextResponse } from "next/server";
@@ -94,115 +95,164 @@ export async function GET(
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
 
-  const categories = await prisma.tournamentCategory.findMany({
-    where: { tournamentId },
-    include: {
-      category: {
-        select: {
-          id: true,
-          name: true,
-          abbreviation: true,
-          modality: true,
-          gender: true,
-          sport: { select: { id: true, name: true } },
+  const fetchFixtureData = async (tx: Prisma.TransactionClient) => {
+    const categories = await tx.tournamentCategory.findMany({
+      where: { tournamentId },
+      include: {
+        category: {
+          select: {
+            id: true,
+            name: true,
+            abbreviation: true,
+            modality: true,
+            gender: true,
+            sport: { select: { id: true, name: true } },
+          },
         },
       },
-    },
-    orderBy: { category: { name: "asc" } },
-  });
+      orderBy: { category: { name: "asc" } },
+    });
 
-  const registrations = await prisma.tournamentRegistration.findMany({
-    where: { tournamentId },
-    orderBy: { createdAt: "asc" },
-    select: {
-      id: true,
-      categoryId: true,
-      groupName: true,
-      seed: true,
-      rankingNumber: true,
-      createdAt: true,
-      teamName: true,
-      player: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          documentType: true,
-          documentNumber: true,
+    const registrations = await tx.tournamentRegistration.findMany({
+      where: { tournamentId },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        categoryId: true,
+        groupName: true,
+        seed: true,
+        rankingNumber: true,
+        createdAt: true,
+        teamName: true,
+        player: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            documentType: true,
+            documentNumber: true,
+          },
+        },
+        partner: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            documentType: true,
+            documentNumber: true,
+          },
+        },
+        partnerTwo: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            documentType: true,
+            documentNumber: true,
+          },
         },
       },
-      partner: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          documentType: true,
-          documentNumber: true,
-        },
+    });
+
+    const groupQualifiers = await tx.tournamentGroupQualifier.findMany({
+      where: { tournamentId },
+      select: { categoryId: true, groupName: true, qualifiers: true },
+    });
+
+    const clubs = await tx.tournamentClub.findMany({
+      where: { tournamentId },
+      select: { id: true, name: true, courtsCount: true },
+      orderBy: { name: "asc" },
+    });
+
+    const matches = await tx.tournamentMatch.findMany({
+      where: { tournamentId },
+      orderBy: [
+        { scheduledDate: "asc" },
+        { startTime: "asc" },
+        { createdAt: "asc" },
+      ],
+      select: {
+        id: true,
+        categoryId: true,
+        groupName: true,
+        stage: true,
+        winnerSide: true,
+        outcomeType: true,
+        outcomeSide: true,
+        roundNumber: true,
+        orderHint: true,
+        scheduledDate: true,
+        startTime: true,
+        games: true,
+        liveState: true,
+        refereeToken: true,
+        teamAId: true,
+        teamBId: true,
+        clubId: true,
+        courtNumber: true,
+        createdAt: true,
+        isBronzeMatch: true,
       },
-      partnerTwo: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          documentType: true,
-          documentNumber: true,
-        },
+    });
+
+    const groupPoints = await tx.tournamentGroupPoints.findUnique({
+      where: { tournamentId },
+      select: {
+        winPoints: true,
+        winWithoutGameLossPoints: true,
+        lossPoints: true,
+        lossWithGameWinPoints: true,
+        tiebreakerOrder: true,
       },
-    },
-  });
+    });
 
-  const groupQualifiers = await prisma.tournamentGroupQualifier.findMany({
-    where: { tournamentId },
-    select: { categoryId: true, groupName: true, qualifiers: true },
-  });
+    const playoffSlots = await tx.playoffSlot.findMany({
+      where: { tournamentId },
+      orderBy: [
+        { categoryId: "asc" },
+        { position: "asc" },
+      ],
+      select: {
+        id: true,
+        categoryId: true,
+        position: true,
+        entrantId: true,
+        locked: true,
+        bracketId: true,
+      },
+    });
 
-  const clubs = await prisma.tournamentClub.findMany({
-    where: { tournamentId },
-    select: { id: true, name: true, courtsCount: true },
-    orderBy: { name: "asc" },
-  });
+    return {
+      categories,
+      registrations,
+      groupQualifiers,
+      clubs,
+      matches,
+      groupPoints,
+      playoffSlots,
+    };
+  };
 
-  const matches = await prisma.tournamentMatch.findMany({
-    where: { tournamentId },
-    orderBy: [
-      { scheduledDate: "asc" },
-      { startTime: "asc" },
-      { createdAt: "asc" },
-    ],
-    select: {
-      id: true,
-      categoryId: true,
-      groupName: true,
-      stage: true,
-      winnerSide: true,
-      outcomeType: true,
-      outcomeSide: true,
-      roundNumber: true,
-      scheduledDate: true,
-      startTime: true,
-      games: true,
-      liveState: true,
-      refereeToken: true,
-      teamAId: true,
-      teamBId: true,
-      clubId: true,
-      courtNumber: true,
-      createdAt: true,
-      isBronzeMatch: true,
-    },
-  });
+  let data: Awaited<ReturnType<typeof fetchFixtureData>>;
 
-  const groupPoints = await prisma.tournamentGroupPoints.findUnique({
-    where: { tournamentId },
-    select: {
-      winPoints: true,
-      winWithoutGameLossPoints: true,
-      lossPoints: true,
-      lossWithGameWinPoints: true,
-      tiebreakerOrder: true,
-    },
-  });
+  try {
+    data = await prisma.$transaction(
+      async (tx) => fetchFixtureData(tx),
+      { maxWait: 10000, timeout: 20000 }
+    );
+  } catch (error: unknown) {
+    const detail =
+      process.env.NODE_ENV !== "production" && error instanceof Error
+        ? error.message
+        : undefined;
+    return NextResponse.json(
+      detail
+        ? { error: "No se pudo cargar el fixture", detail }
+        : { error: "No se pudo cargar el fixture" },
+      { status: 500 }
+    );
+  }
 
   const playDays = Array.isArray(tournament.playDays) ? tournament.playDays : [];
 
@@ -214,13 +264,13 @@ export async function GET(
     sessionRole: session.user.role,
     playDays,
     groupPoints: {
-      winPoints: groupPoints?.winPoints ?? 0,
-      winWithoutGameLossPoints: groupPoints?.winWithoutGameLossPoints ?? 0,
-      lossPoints: groupPoints?.lossPoints ?? 0,
-      lossWithGameWinPoints: groupPoints?.lossWithGameWinPoints ?? 0,
-      tiebreakerOrder: normalizeTiebreakerOrder(groupPoints?.tiebreakerOrder),
+      winPoints: data.groupPoints?.winPoints ?? 0,
+      winWithoutGameLossPoints: data.groupPoints?.winWithoutGameLossPoints ?? 0,
+      lossPoints: data.groupPoints?.lossPoints ?? 0,
+      lossWithGameWinPoints: data.groupPoints?.lossWithGameWinPoints ?? 0,
+      tiebreakerOrder: normalizeTiebreakerOrder(data.groupPoints?.tiebreakerOrder),
     },
-    categories: categories.map((item) => ({
+    categories: data.categories.map((item) => ({
       id: item.category.id,
       name: item.category.name,
       abbreviation: item.category.abbreviation,
@@ -230,18 +280,19 @@ export async function GET(
       drawType: item.drawType,
       groupQualifiers: item.groupQualifiers ?? 2,
       hasBronzeMatch: item.hasBronzeMatch,
+      playoffStatus: item.playoffStatus ?? "DRAFT",
     })),
-    groupQualifiers: groupQualifiers.map((entry) => ({
+    groupQualifiers: data.groupQualifiers.map((entry) => ({
       categoryId: entry.categoryId,
       groupName: entry.groupName,
       qualifiers: entry.qualifiers,
     })),
-    clubs: clubs.map((club) => ({
+    clubs: data.clubs.map((club) => ({
       id: club.id,
       name: club.name,
       courtsCount: club.courtsCount,
     })),
-    registrations: registrations.map((registration) => ({
+    registrations: data.registrations.map((registration) => ({
       id: registration.id,
       categoryId: registration.categoryId,
       groupName: registration.groupName,
@@ -253,7 +304,7 @@ export async function GET(
       partnerTwo: registration.partnerTwo,
       teamName: registration.teamName,
     })),
-    matches: matches.map((match) => ({
+    matches: data.matches.map((match) => ({
       id: match.id,
       categoryId: match.categoryId,
       groupName: match.groupName,
@@ -263,6 +314,7 @@ export async function GET(
       outcomeType: match.outcomeType,
       outcomeSide: match.outcomeSide,
       roundNumber: match.roundNumber,
+      orderHint: match.orderHint ?? null,
       scheduledDate: toDateOnly(match.scheduledDate),
       startTime: match.startTime,
       games: match.games,
@@ -273,6 +325,14 @@ export async function GET(
       clubId: match.clubId,
       courtNumber: match.courtNumber,
       createdAt: toDateOnly(match.createdAt),
+    })),
+    playoffSlots: data.playoffSlots.map((slot) => ({
+      id: slot.id,
+      categoryId: slot.categoryId,
+      position: slot.position,
+      entrantId: slot.entrantId,
+      locked: slot.locked,
+      bracketId: slot.bracketId,
     })),
   });
 }

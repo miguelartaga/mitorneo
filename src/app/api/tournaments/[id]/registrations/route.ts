@@ -180,13 +180,6 @@ export async function GET(
   if (!canManage) {
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
-  if (tournament.status === "ACTIVE" || tournament.status === "FINISHED") {
-    return NextResponse.json(
-      { error: "El torneo ya esta pagado y no permite mas inscripciones" },
-      { status: 400 }
-    );
-  }
-
   const registrations = await prisma.tournamentRegistration.findMany({
     where: { tournamentId },
     orderBy: { createdAt: "desc" },

@@ -143,6 +143,30 @@ const formatTeamName = (registration?: Registration) => {
   return playersLabel || "N/D";
 };
 
+const buildRegistrationSearchText = (registration?: Registration | null) => {
+  if (!registration) return "";
+  const parts: string[] = [];
+  const teamName = registration.teamName?.trim();
+  if (teamName) parts.push(teamName);
+  const players = [
+    registration.player,
+    registration.partner,
+    registration.partnerTwo,
+  ].filter(Boolean) as Player[];
+  players.forEach((player) => {
+    const fullName = `${player.firstName} ${player.lastName}`.trim();
+    if (fullName) parts.push(fullName);
+  });
+  return parts.join(" ").toLowerCase();
+};
+
+const isMatchMarked = (match: Match) => {
+  const hasGames = Array.isArray(match.games) && match.games.length > 0;
+  const outcomeType = match.outcomeType ?? "PLAYED";
+  const hasOutcome = outcomeType !== "PLAYED";
+  return hasGames || hasOutcome;
+};
+
 const DEFAULT_TIEBREAKERS: Tiebreaker[] = [
   "SETS_DIFF",
   "MATCHES_WON",
@@ -508,6 +532,10 @@ export default function TournamentSchedule({ tournamentId, tournamentName }: Pro
   const [refereeMatchId, setRefereeMatchId] = useState<string | null>(null);
   const [refereeMessage, setRefereeMessage] = useState<string | null>(null);
   const [refereeError, setRefereeError] = useState<string | null>(null);
+  const [playerSearch, setPlayerSearch] = useState("");
+  const [matchStatusFilter, setMatchStatusFilter] = useState<
+    "ALL" | "UNMARKED" | "MARKED"
+  >("ALL");
 
   const toggleTeamDetails = (registrationId: string) => {
     setExpandedTeams((prev) => {
@@ -1022,6 +1050,10 @@ const renderTeamDisplay = (
     return (hasA && !hasB) || (hasB && !hasA);
   };
 
+  const normalizedPlayerSearch = playerSearch.trim().toLowerCase();
+  const isFiltering =
+    normalizedPlayerSearch.length > 0 || matchStatusFilter !== "ALL";
+
   const matchesBySlot = useMemo(() => {
     const map = new Map<string, Match>();
     matches.forEach((match) => {
@@ -1037,6 +1069,48 @@ const renderTeamDisplay = (
   const unscheduledMatches = useMemo(
     () => matches.filter((match) => !matchSlotKey(match) && !isByeMatch(match)),
     [matches]
+  );
+
+  const filteredMatches = useMemo(() => {
+    return matches.filter((match) => {
+      if (matchStatusFilter !== "ALL") {
+        const marked = isMatchMarked(match);
+        if (matchStatusFilter === "MARKED" && !marked) return false;
+        if (matchStatusFilter === "UNMARKED" && marked) return false;
+      }
+      if (!normalizedPlayerSearch) return true;
+      const teamA = match.teamAId
+        ? registrationMap.get(match.teamAId)
+        : null;
+      const teamB = match.teamBId
+        ? registrationMap.get(match.teamBId)
+        : null;
+      const searchText = `${buildRegistrationSearchText(
+        teamA
+      )} ${buildRegistrationSearchText(teamB)}`.trim();
+      if (!searchText) return false;
+      return searchText.includes(normalizedPlayerSearch);
+    });
+  }, [matches, matchStatusFilter, normalizedPlayerSearch, registrationMap]);
+
+  const filteredMatchesBySlot = useMemo(() => {
+    const map = new Map<string, Match>();
+    filteredMatches.forEach((match) => {
+      if (isByeMatch(match)) return;
+      const key = matchSlotKey(match);
+      if (key) {
+        map.set(key, match);
+      }
+    });
+    return map;
+  }, [filteredMatches]);
+
+  const filteredUnscheduledMatches = useMemo(
+    () =>
+      filteredMatches.filter(
+        (match) => !matchSlotKey(match) && !isByeMatch(match)
+      ),
+    [filteredMatches]
   );
 
   const slotsByDay = useMemo(() => {
@@ -1068,6 +1142,17 @@ const renderTeamDisplay = (
     });
     return map;
   }, [scheduleDays, scheduleMap, courts]);
+
+  const visibleScheduleDays = useMemo(() => {
+    if (!isFiltering) return scheduleDays;
+    const daysWithMatches = new Set<string>();
+    filteredMatches.forEach((match) => {
+      if (match.scheduledDate) {
+        daysWithMatches.add(match.scheduledDate);
+      }
+    });
+    return scheduleDays.filter((day) => daysWithMatches.has(day));
+  }, [filteredMatches, isFiltering, scheduleDays]);
 
   const scoreMatch = useMemo(
     () => matches.find((match) => match.id === scoreMatchId) ?? null,
@@ -1582,6 +1667,48 @@ const renderTeamDisplay = (
             {downloadingPdf ? "Descargando..." : "Descargar fixture (PDF)"}
           </button>
         </div>
+        <div className="mt-4 flex flex-wrap items-center gap-3 print-hidden">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Filtro jugador
+            </span>
+            <input
+              value={playerSearch}
+              onChange={(event) => setPlayerSearch(event.target.value)}
+              placeholder="Nombre del jugador"
+              className="w-56 rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+              Estado
+            </span>
+            <select
+              value={matchStatusFilter}
+              onChange={(event) =>
+                setMatchStatusFilter(
+                  event.target.value as "ALL" | "UNMARKED" | "MARKED"
+                )
+              }
+              className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            >
+              <option value="ALL">Todos</option>
+              <option value="UNMARKED">Sin marcar</option>
+              <option value="MARKED">Marcados</option>
+            </select>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setPlayerSearch("");
+              setMatchStatusFilter("ALL");
+            }}
+            disabled={!isFiltering}
+            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            Limpiar filtros
+          </button>
+        </div>
       </div>
 
       {matches.length === 0 ? (
@@ -1601,7 +1728,9 @@ const renderTeamDisplay = (
                 </p>
               </div>
               <span className="text-xs text-slate-500">
-                {unscheduledMatches.length} sin horario
+                {isFiltering
+                  ? `${filteredUnscheduledMatches.length} de ${unscheduledMatches.length} sin horario`
+                  : `${unscheduledMatches.length} sin horario`}
               </span>
             </div>
             <div
@@ -1624,13 +1753,15 @@ const renderTeamDisplay = (
                   : "border-slate-200/70 bg-slate-50/70"
               }`}
             >
-              {unscheduledMatches.length === 0 ? (
+              {filteredUnscheduledMatches.length === 0 ? (
                 <p className="text-sm text-slate-500">
-                  Todos los partidos tienen horario asignado.
+                  {isFiltering
+                    ? "No hay partidos sin horario con los filtros actuales."
+                    : "Todos los partidos tienen horario asignado."}
                 </p>
-                ) : (
-                  <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white">
-                    <table className="min-w-[640px] divide-y divide-slate-200/70 text-xs">
+              ) : (
+                <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white">
+                  <table className="min-w-[640px] divide-y divide-slate-200/70 text-xs">
                     <thead className="bg-slate-50/80 text-[10px] uppercase tracking-[0.18em] text-slate-500">
                       <tr>
                         <th className="px-3 py-3 text-left font-semibold">
@@ -1654,7 +1785,7 @@ const renderTeamDisplay = (
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
-                      {unscheduledMatches.map((match) => {
+                      {filteredUnscheduledMatches.map((match) => {
                         const category = categoryMap.get(match.categoryId);
                         const teamA = match.teamAId
                           ? registrationMap.get(match.teamAId)
@@ -1809,9 +1940,13 @@ const renderTeamDisplay = (
             <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
               No hay horarios configurados para este torneo.
             </p>
+          ) : isFiltering && visibleScheduleDays.length === 0 ? (
+            <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              No hay partidos programados con los filtros actuales.
+            </p>
           ) : (
             <div className="space-y-6">
-              {scheduleDays.map((day) => {
+              {visibleScheduleDays.map((day) => {
                 const entry = scheduleMap.get(day);
                 const slots = slotsByDay.get(day) ?? [];
                 const summary = entry
@@ -1881,7 +2016,10 @@ const renderTeamDisplay = (
                           </thead>
                           <tbody className="divide-y divide-slate-100 bg-white">
                             {slots.map((slot) => {
-                              const match = matchesBySlot.get(slot.key);
+                              const match = filteredMatchesBySlot.get(slot.key);
+                              if (isFiltering && !match) {
+                                return null;
+                              }
                               const category = match
                                 ? categoryMap.get(match.categoryId)
                                 : null;

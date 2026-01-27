@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
 import { BracketCanvas } from "@/components/tournaments/bracket-canvas";
+import { buildSlotPositionMap } from "@/lib/playoff-match-utils";
+import { buildSeedOrder } from "@/lib/playoff-utils";
+import { useEffect, useMemo, useState } from "react";
 
 type DrawType = "ROUND_ROBIN" | "GROUPS_PLAYOFF" | "PLAYOFF";
 type MatchStage = "GROUP" | "PLAYOFF";
@@ -39,6 +41,7 @@ type Category = {
   abbreviation: string;
   drawType: DrawType | null;
   groupQualifiers?: number | null;
+  playoffStatus?: "DRAFT" | "LOCKED" | "PUBLISHED";
 };
 
 type Match = {
@@ -47,6 +50,7 @@ type Match = {
   groupName: string | null;
   stage: MatchStage | null;
   roundNumber: number | null;
+  orderHint?: number | null;
   games?: unknown;
   winnerSide?: "A" | "B" | null;
   outcomeType?: OutcomeType | null;
@@ -61,6 +65,15 @@ type GroupQualifier = {
   categoryId: string;
   groupName: string;
   qualifiers: number;
+};
+
+type PlayoffSlot = {
+  id: string;
+  categoryId: string;
+  position: number;
+  entrantId: string | null;
+  locked: boolean;
+  bracketId?: string | null;
 };
 
 type FixtureResponse = {
@@ -78,6 +91,7 @@ type FixtureResponse = {
     lossWithGameWinPoints?: number;
     tiebreakerOrder?: string[];
   };
+  playoffSlots?: PlayoffSlot[];
 };
 
 type Props = {
@@ -225,6 +239,168 @@ const nextPowerOfTwo = (value: number) => {
   return size;
 };
 
+const buildGroupStandings = ({
+  categories,
+  registrations,
+  groupMatches,
+  groupPoints,
+}: {
+  categories: Category[];
+  registrations: Registration[];
+  groupMatches: Match[];
+  groupPoints: {
+    winPoints: number;
+    winWithoutGameLossPoints: number;
+    lossPoints: number;
+    lossWithGameWinPoints: number;
+    tiebreakerOrder: Tiebreaker[];
+  };
+}) => {
+  const labelByRegistration = new Map<string, string>();
+  const standingsByCategory = new Map<string, Map<string, StandingEntry[]>>();
+  const groupCategories = categories.filter((category) =>
+    groupDrawTypes.has(category.drawType)
+  );
+  if (groupCategories.length === 0) {
+    return { labelByRegistration, standingsByCategory };
+  }
+
+  groupCategories.forEach((category) => {
+    standingsByCategory.set(category.id, new Map());
+  });
+
+  const standingsById = new Map<string, StandingEntry>();
+
+  registrations.forEach((registration) => {
+    if (!standingsByCategory.has(registration.categoryId)) return;
+    const createdAt = registration.createdAt
+      ? new Date(registration.createdAt)
+      : new Date(0);
+    const entry: StandingEntry = {
+      id: registration.id,
+      categoryId: registration.categoryId,
+      groupName: normalizeGroupName(registration.groupName),
+      points: 0,
+      matchesWon: 0,
+      matchesLost: 0,
+      setsWon: 0,
+      setsLost: 0,
+      pointsWon: 0,
+      pointsLost: 0,
+      seed: registration.seed ?? null,
+      rankingNumber: registration.rankingNumber ?? null,
+      createdAt,
+    };
+    standingsById.set(registration.id, entry);
+    const groups = standingsByCategory.get(registration.categoryId);
+    if (!groups) return;
+    if (!groups.has(entry.groupName)) {
+      groups.set(entry.groupName, []);
+    }
+    groups.get(entry.groupName)?.push(entry);
+  });
+
+  groupMatches.forEach((match) => {
+    if (!standingsByCategory.has(match.categoryId)) return;
+    const teamA = match.teamAId ? standingsById.get(match.teamAId) : undefined;
+    const teamB = match.teamBId ? standingsById.get(match.teamBId) : undefined;
+    if (!teamA || !teamB) return;
+
+    const outcomeType = match.outcomeType ?? "PLAYED";
+    const outcomeSide = match.outcomeSide ?? null;
+
+    if (outcomeType !== "PLAYED") {
+      const winnerSide =
+        outcomeSide === "A"
+          ? "B"
+          : outcomeSide === "B"
+            ? "A"
+            : match.winnerSide ?? null;
+      if (!winnerSide) return;
+      if (winnerSide === "A") {
+        teamA.matchesWon += 1;
+        teamB.matchesLost += 1;
+        teamA.points += groupPoints.winWithoutGameLossPoints;
+        teamB.points += groupPoints.lossPoints;
+      } else {
+        teamB.matchesWon += 1;
+        teamA.matchesLost += 1;
+        teamB.points += groupPoints.winWithoutGameLossPoints;
+        teamA.points += groupPoints.lossPoints;
+      }
+      return;
+    }
+
+    const result = computeMatchResult(parseGames(match.games));
+    if (result) {
+      teamA.setsWon += result.setsA;
+      teamA.setsLost += result.setsB;
+      teamA.pointsWon += result.pointsA;
+      teamA.pointsLost += result.pointsB;
+      teamB.setsWon += result.setsB;
+      teamB.setsLost += result.setsA;
+      teamB.pointsWon += result.pointsB;
+      teamB.pointsLost += result.pointsA;
+
+      if (result.winner === "A") {
+        teamA.matchesWon += 1;
+        teamB.matchesLost += 1;
+        teamA.points +=
+          result.setsB === 0
+            ? groupPoints.winWithoutGameLossPoints
+            : groupPoints.winPoints;
+        teamB.points +=
+          result.setsB > 0
+            ? groupPoints.lossWithGameWinPoints
+            : groupPoints.lossPoints;
+      } else {
+        teamB.matchesWon += 1;
+        teamA.matchesLost += 1;
+        teamB.points +=
+          result.setsA === 0
+            ? groupPoints.winWithoutGameLossPoints
+            : groupPoints.winPoints;
+        teamA.points +=
+          result.setsA > 0
+            ? groupPoints.lossWithGameWinPoints
+            : groupPoints.lossPoints;
+      }
+      return;
+    }
+
+    if (match.winnerSide) {
+      if (match.winnerSide === "A") {
+        teamA.matchesWon += 1;
+        teamB.matchesLost += 1;
+        teamA.points += groupPoints.winPoints;
+        teamB.points += groupPoints.lossPoints;
+      } else {
+        teamB.matchesWon += 1;
+        teamA.matchesLost += 1;
+        teamB.points += groupPoints.winPoints;
+        teamA.points += groupPoints.lossPoints;
+      }
+    }
+  });
+
+  standingsByCategory.forEach((groups) => {
+    groups.forEach((entries, groupName) => {
+      const ordered = [...entries].sort((a, b) =>
+        compareStandings(a, b, groupPoints.tiebreakerOrder)
+      );
+      groups.set(groupName, ordered);
+      ordered.forEach((entry, index) => {
+        labelByRegistration.set(
+          entry.id,
+          `${formatOrdinal(index + 1)} Grupo ${groupName}`
+        );
+      });
+    });
+  });
+
+  return { labelByRegistration, standingsByCategory };
+};
+
 export default function TournamentPlayoffs({
   tournamentId,
   tournamentName,
@@ -255,6 +431,8 @@ export default function TournamentPlayoffs({
   const [sessionRole, setSessionRole] = useState<"ADMIN" | "TOURNAMENT_ADMIN">(
     "TOURNAMENT_ADMIN"
   );
+  const [playoffSlots, setPlayoffSlots] = useState<PlayoffSlot[]>([]);
+  const [lockingCategory, setLockingCategory] = useState<string | null>(null);
   const loadData = async () => {
     setLoading(true);
     setError(null);
@@ -278,6 +456,9 @@ export default function TournamentPlayoffs({
     setMatches(Array.isArray(data.matches) ? data.matches : []);
     setGroupQualifiers(
       Array.isArray(data.groupQualifiers) ? data.groupQualifiers : []
+    );
+    setPlayoffSlots(
+      Array.isArray(data.playoffSlots) ? data.playoffSlots : []
     );
     if (data.tournamentStatus) {
       setTournamentStatus(data.tournamentStatus);
@@ -382,165 +563,36 @@ export default function TournamentPlayoffs({
     return map;
   }, [playoffCategories, registrationsByCategory, qualifiersByGroup]);
 
-  const bracketSizeByCategory = useMemo(() => {
-    const map = new Map<string, number>();
-    qualifiedCountByCategory.forEach((count, categoryId) => {
-      if (count > 1) {
-        map.set(categoryId, nextPowerOfTwo(count));
-      }
+  const deriveBracketSizeFromMatches = (matches: Match[]) => {
+    if (matches.length === 0) return null;
+    const roundCounts = new Map<number, number>();
+    matches.forEach((match) => {
+      const round = match.roundNumber ?? 1;
+      roundCounts.set(round, (roundCounts.get(round) ?? 0) + 1);
     });
-    return map;
-  }, [qualifiedCountByCategory]);
+    let maxSize = 0;
+    roundCounts.forEach((count, round) => {
+      const size = count * 2 ** Math.max(0, round - 1);
+      if (size > maxSize) maxSize = size;
+    });
+    return maxSize > 1 ? maxSize : null;
+  };
 
   const groupMatches = useMemo(
     () => matches.filter((match) => match.stage === "GROUP"),
     [matches]
   );
 
-  const labelByRegistration = useMemo(() => {
-    const labelMap = new Map<string, string>();
-    const groupCategories = categories.filter((category) =>
-      groupDrawTypes.has(category.drawType)
-    );
-    if (groupCategories.length === 0) return labelMap;
-
-    const standingsByCategory = new Map<string, Map<string, StandingEntry[]>>();
-
-    groupCategories.forEach((category) => {
-      standingsByCategory.set(category.id, new Map());
-    });
-
-    const standingsById = new Map<string, StandingEntry>();
-
-    registrations.forEach((registration) => {
-      if (!standingsByCategory.has(registration.categoryId)) return;
-      const createdAt = registration.createdAt
-        ? new Date(registration.createdAt)
-        : new Date(0);
-      const entry: StandingEntry = {
-        id: registration.id,
-        categoryId: registration.categoryId,
-        groupName: normalizeGroupName(registration.groupName),
-        points: 0,
-        matchesWon: 0,
-        matchesLost: 0,
-        setsWon: 0,
-        setsLost: 0,
-        pointsWon: 0,
-        pointsLost: 0,
-        seed: registration.seed ?? null,
-        rankingNumber: registration.rankingNumber ?? null,
-        createdAt,
-      };
-      standingsById.set(registration.id, entry);
-      const groups = standingsByCategory.get(registration.categoryId);
-      if (!groups) return;
-      if (!groups.has(entry.groupName)) {
-        groups.set(entry.groupName, []);
-      }
-      groups.get(entry.groupName)?.push(entry);
-    });
-
-    groupMatches.forEach((match) => {
-      if (!standingsByCategory.has(match.categoryId)) return;
-      const teamA = match.teamAId
-        ? standingsById.get(match.teamAId)
-        : undefined;
-      const teamB = match.teamBId
-        ? standingsById.get(match.teamBId)
-        : undefined;
-      if (!teamA || !teamB) return;
-
-      const outcomeType = match.outcomeType ?? "PLAYED";
-      const outcomeSide = match.outcomeSide ?? null;
-
-      if (outcomeType !== "PLAYED") {
-        const winnerSide =
-          outcomeSide === "A"
-            ? "B"
-            : outcomeSide === "B"
-            ? "A"
-            : match.winnerSide ?? null;
-        if (!winnerSide) return;
-        if (winnerSide === "A") {
-          teamA.matchesWon += 1;
-          teamB.matchesLost += 1;
-          teamA.points += groupPoints.winWithoutGameLossPoints;
-          teamB.points += groupPoints.lossPoints;
-        } else {
-          teamB.matchesWon += 1;
-          teamA.matchesLost += 1;
-          teamB.points += groupPoints.winWithoutGameLossPoints;
-          teamA.points += groupPoints.lossPoints;
-        }
-        return;
-      }
-
-      const result = computeMatchResult(parseGames(match.games));
-      if (result) {
-        teamA.setsWon += result.setsA;
-        teamA.setsLost += result.setsB;
-        teamA.pointsWon += result.pointsA;
-        teamA.pointsLost += result.pointsB;
-        teamB.setsWon += result.setsB;
-        teamB.setsLost += result.setsA;
-        teamB.pointsWon += result.pointsB;
-        teamB.pointsLost += result.pointsA;
-
-        if (result.winner === "A") {
-          teamA.matchesWon += 1;
-          teamB.matchesLost += 1;
-          teamA.points +=
-            result.setsB === 0
-              ? groupPoints.winWithoutGameLossPoints
-              : groupPoints.winPoints;
-          teamB.points +=
-            result.setsB > 0
-              ? groupPoints.lossWithGameWinPoints
-              : groupPoints.lossPoints;
-        } else {
-          teamB.matchesWon += 1;
-          teamA.matchesLost += 1;
-          teamB.points +=
-            result.setsA === 0
-              ? groupPoints.winWithoutGameLossPoints
-              : groupPoints.winPoints;
-          teamA.points +=
-            result.setsA > 0
-              ? groupPoints.lossWithGameWinPoints
-              : groupPoints.lossPoints;
-        }
-        return;
-      }
-
-      if (match.winnerSide) {
-        if (match.winnerSide === "A") {
-          teamA.matchesWon += 1;
-          teamB.matchesLost += 1;
-          teamA.points += groupPoints.winPoints;
-          teamB.points += groupPoints.lossPoints;
-        } else {
-          teamB.matchesWon += 1;
-          teamA.matchesLost += 1;
-          teamB.points += groupPoints.winPoints;
-          teamA.points += groupPoints.lossPoints;
-        }
-      }
-    });
-
-    standingsByCategory.forEach((groups) => {
-      groups.forEach((entries, groupName) => {
-        const ordered = [...entries].sort((a, b) =>
-          compareStandings(a, b, groupPoints.tiebreakerOrder)
-        );
-        ordered.forEach((entry, index) => {
-          labelMap.set(entry.id, `${formatOrdinal(index + 1)} Grupo ${groupName}`);
-        });
-      });
-    });
-
-    return labelMap;
-  }, [categories, registrations, groupMatches, groupPoints]);
+  const { labelByRegistration, standingsByCategory } = useMemo(
+    () =>
+      buildGroupStandings({
+        categories,
+        registrations,
+        groupMatches,
+        groupPoints,
+      }),
+    [categories, registrations, groupMatches, groupPoints]
+  );
 
   const playoffMatchesByCategory = useMemo(() => {
     const map = new Map<string, Match[]>();
@@ -554,6 +606,78 @@ export default function TournamentPlayoffs({
       });
     return map;
   }, [matches]);
+
+  const slotMapByCategory = useMemo(() => {
+    const map = new Map<string, PlayoffSlot[]>();
+    playoffSlots.forEach((slot) => {
+      const list = map.get(slot.categoryId) ?? [];
+      list.push(slot);
+      map.set(slot.categoryId, list);
+    });
+    map.forEach((list) => list.sort((a, b) => a.position - b.position));
+    return map;
+  }, [playoffSlots]);
+
+  const slotPositionMapByCategory = useMemo(() => {
+    const map = new Map<string, Map<string, number>>();
+    slotMapByCategory.forEach((slots, categoryId) => {
+      const matchesForCategory = playoffMatchesByCategory.get(categoryId) ?? [];
+      const mapping = buildSlotPositionMap({
+        slots,
+        matches: matchesForCategory.map((match) => ({
+          id: match.id,
+          roundNumber: match.roundNumber,
+          createdAt: match.createdAt,
+          teamAId: match.teamAId,
+          teamBId: match.teamBId,
+        })),
+      });
+      map.set(categoryId, mapping);
+    });
+    return map;
+  }, [slotMapByCategory, playoffMatchesByCategory]);
+
+  const qualifiedByCategory = useMemo(() => {
+    const map = new Map<string, Registration[]>();
+    playoffCategories.forEach((category) => {
+      const categoryRegistrations =
+        registrationsByCategory.get(category.id) ?? [];
+      if (category.drawType === "PLAYOFF") {
+        map.set(category.id, [...categoryRegistrations]);
+        return;
+      }
+      const groups = standingsByCategory.get(category.id);
+      if (!groups) {
+        map.set(category.id, []);
+        return;
+      }
+      const defaultQualifiers =
+        typeof category.groupQualifiers === "number" &&
+        category.groupQualifiers > 0
+          ? category.groupQualifiers
+          : 2;
+      const list: Registration[] = [];
+      groups.forEach((entries, groupName) => {
+        const qualifiers =
+          qualifiersByGroup.get(`${category.id}:${groupName}`) ??
+          defaultQualifiers;
+        entries
+          .slice(0, Math.max(1, qualifiers))
+          .forEach((entry) => {
+            const registration = registrationMap.get(entry.id);
+            if (registration) list.push(registration);
+          });
+      });
+      map.set(category.id, list);
+    });
+    return map;
+  }, [
+    playoffCategories,
+    registrationsByCategory,
+    standingsByCategory,
+    qualifiersByGroup,
+    registrationMap,
+  ]);
 
   const playoffRoundLabels = useMemo(() => {
     const map = new Map<string, Map<number, string>>();
@@ -588,13 +712,14 @@ export default function TournamentPlayoffs({
     setError(null);
     setMessage(null);
 
+    const payload = categoryId
+      ? { categoryId, regenerate: Boolean(regenerate) }
+      : {};
     const res = await fetch(`/api/tournaments/${tournamentId}/fixtures/playoffs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify(
-        categoryId ? { categoryId, regenerate: Boolean(regenerate) } : {}
-      ),
+      body: JSON.stringify(payload),
     });
 
     const data = await res.json().catch(() => ({}));
@@ -640,6 +765,74 @@ export default function TournamentPlayoffs({
 
     await loadData();
     setMessage("Llave actualizada");
+  };
+
+  const handleLockCategory = async (categoryId: string) => {
+    if (lockingCategory === categoryId) return;
+    setLockingCategory(categoryId);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch(
+        `/api/tournaments/${tournamentId}/fixtures/playoffs/lock`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ categoryId }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = data?.detail ? ` (${data.detail})` : "";
+        throw new Error(
+          `${data?.error ?? "No se pudo bloquear la llave"}${detail}`
+        );
+      }
+      await loadData();
+      setMessage("Llaves bloqueadas");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo bloquear la llave");
+    } finally {
+      setLockingCategory(null);
+    }
+  };
+
+  const handleSlotAssign = async (
+    categoryId: string,
+    position: number,
+    entrantId: string | null
+  ) => {
+    if (swapping) return;
+    setSwapping(true);
+    setError(null);
+    setMessage(null);
+
+    const res = await fetch(
+      `/api/tournaments/${tournamentId}/fixtures/playoffs/slots`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          categoryId,
+          position,
+          entrantId,
+        }),
+      }
+    );
+
+    const data = await res.json().catch(() => ({}));
+    setSwapping(false);
+
+    if (!res.ok) {
+      const detail = data?.detail ? ` (${data.detail})` : "";
+      setError(`${data?.error ?? "No se pudo actualizar el slot"}${detail}`);
+      return;
+    }
+
+    await loadData();
+    setMessage("Slot actualizado");
   };
 
   const isMatchComplete = (match: Match) => {
@@ -792,11 +985,11 @@ export default function TournamentPlayoffs({
               onClick={() => {
                 if (hasExistingPlayoffs) {
                   const confirmed = window.confirm(
-                    "Ya existen llaves. Regenerar borrara las actuales. Continuar?"
+                    "Ya existen llaves. Este botón no regenera. Si quieres regenerar, usa el botón de la categoría."
                   );
                   if (!confirmed) return;
                 }
-                handleGenerate(undefined, hasExistingPlayoffs);
+                handleGenerate();
               }}
               disabled={generating === "ALL" || playoffCategories.length === 0}
               className="inline-flex items-center justify-center rounded-full bg-indigo-600 px-5 py-2 text-xs font-semibold text-white shadow-[0_14px_32px_-18px_rgba(79,70,229,0.45)] transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
@@ -822,12 +1015,15 @@ export default function TournamentPlayoffs({
           const waitingPlayoff =
             category.drawType === "GROUPS_PLAYOFF" &&
             !(groupStageCompleteByCategory.get(category.id) ?? false);
+          const hasCategoryPlayoffs = categoryMatches.length > 0;
           const displayMatches = waitingPlayoff
-            ? categoryMatches.map((match) => ({
-                ...match,
-                teamAId: null,
-                teamBId: null,
-              }))
+            ? hasCategoryPlayoffs
+              ? categoryMatches
+              : categoryMatches.map((match) => ({
+                  ...match,
+                  teamAId: null,
+                  teamBId: null,
+                }))
             : categoryMatches;
           const mainMatches = displayMatches.filter(
             (match) => !match.isBronzeMatch
@@ -844,6 +1040,7 @@ export default function TournamentPlayoffs({
             roundMap.get(round)?.push(match);
           });
           const roundNumbers = Array.from(roundMap.keys()).sort((a, b) => a - b);
+          const firstRoundNumber = roundNumbers[0] ?? 1;
           const bronzeRoundMap = new Map<number, Match[]>();
           bronzeMatches.forEach((match) => {
             const round = match.roundNumber ?? 1;
@@ -864,16 +1061,140 @@ export default function TournamentPlayoffs({
             nextPowerOfTwo(bronzeMatches.length || 2)
           );
           const labelMap = playoffRoundLabels.get(category.id);
-          const bracketSize = bracketSizeByCategory.get(category.id);
           const qualifiedCount = qualifiedCountByCategory.get(category.id) ?? 0;
           const registrationsCount =
             registrationsByCategory.get(category.id)?.length ?? 0;
-          const hasCategoryPlayoffs =
-            (playoffMatchesByCategory.get(category.id) ?? []).length > 0;
+          const qualifiedRegistrations =
+            qualifiedByCategory.get(category.id) ?? [];
           const labelForBracket = new Map<string, string>();
           labelByRegistration.forEach((value, key) => {
             labelForBracket.set(key, value);
           });
+          const slotEntries = slotMapByCategory.get(category.id) ?? [];
+          const slotPositionMap =
+            slotPositionMapByCategory.get(category.id) ?? new Map();
+          const derivedBracketSize =
+            slotEntries.length > 0
+              ? slotEntries.length
+              : deriveBracketSizeFromMatches(mainMatches) ??
+                (qualifiedCount > 1 ? nextPowerOfTwo(qualifiedCount) : null);
+          const mainMatchesForBracket = mainMatches.map((match) => {
+            const round = match.roundNumber ?? firstRoundNumber;
+            if (round !== firstRoundNumber) {
+              return match;
+            }
+            const posA = slotPositionMap.get(`${match.id}:A`);
+            const posB = slotPositionMap.get(`${match.id}:B`);
+            const size = derivedBracketSize ?? 0;
+            const seedOrder = size > 0 ? buildSeedOrder(size) : [];
+            const orderMap = new Map<string, number>();
+            for (let i = 0; i < seedOrder.length; i += 2) {
+              const seedA = seedOrder[i];
+              const seedB = seedOrder[i + 1];
+              if (!seedA || !seedB) continue;
+              orderMap.set(`${seedA}|${seedB}`, i / 2);
+              orderMap.set(`${seedB}|${seedA}`, i / 2);
+            }
+            const orderHint =
+              typeof posA === "number" && typeof posB === "number"
+                ? orderMap.get(`${posA}|${posB}`)
+                : undefined;
+            return { ...match, orderHint };
+          });
+          const seedOrderForSlots =
+            derivedBracketSize && derivedBracketSize > 0
+              ? buildSeedOrder(derivedBracketSize)
+              : [];
+          const orderHintByMatchId = new Map<string, number>();
+          mainMatchesForBracket.forEach((match) => {
+            if (typeof match.orderHint === "number") {
+              orderHintByMatchId.set(match.id, match.orderHint);
+            }
+          });
+          const firstRoundMatches = mainMatchesForBracket
+            .filter((match) => (match.roundNumber ?? firstRoundNumber) === firstRoundNumber)
+            .slice()
+            .sort((a, b) => {
+              const aOrder = typeof a.orderHint === "number" ? a.orderHint : 9999;
+              const bOrder = typeof b.orderHint === "number" ? b.orderHint : 9999;
+              if (aOrder !== bOrder) return aOrder - bOrder;
+              const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+              const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+              return aTime - bTime;
+            });
+          const fallbackIndexByMatchId = new Map<string, number>();
+          firstRoundMatches.forEach((match, index) => {
+            fallbackIndexByMatchId.set(match.id, index);
+          });
+          const occupiedRegistrationIds = new Set<string>();
+          slotEntries.forEach((slot) => {
+            if (slot.entrantId) {
+              occupiedRegistrationIds.add(slot.entrantId);
+            }
+          });
+          const bracketState = category.playoffStatus ?? "DRAFT";
+          const canEditSlots =
+            bracketState === "DRAFT" &&
+            !waitingPlayoff &&
+            qualifiedRegistrations.length > 0;
+          const statusInfo =
+            {
+              DRAFT: {
+                label: "Borrador",
+                classes: "bg-slate-100 text-slate-600",
+              },
+              LOCKED: {
+                label: "Bloqueado",
+                classes: "bg-amber-100 text-amber-900",
+              },
+              PUBLISHED: {
+                label: "Publicado",
+                classes: "bg-emerald-100 text-emerald-800",
+              },
+            }[bracketState] ?? {
+              label: "Estado",
+              classes: "bg-slate-100 text-slate-600",
+            };
+          const handleSelectChange = async (
+            matchId: string,
+            side: "A" | "B",
+            selectedId: string
+          ) => {
+            if (!selectedId) return;
+            let slotPosition = slotPositionMap.get(`${matchId}:${side}`);
+            if (slotPosition == null) {
+              const hint = orderHintByMatchId.get(matchId);
+              if (
+                typeof hint === "number" &&
+                seedOrderForSlots.length >= hint * 2 + 2
+              ) {
+                const seedPos =
+                  seedOrderForSlots[side === "A" ? hint * 2 : hint * 2 + 1];
+                if (typeof seedPos === "number") {
+                  slotPosition = seedPos;
+                }
+              }
+            }
+            if (slotPosition == null) {
+              const fallbackIndex = fallbackIndexByMatchId.get(matchId);
+              if (
+                typeof fallbackIndex === "number" &&
+                seedOrderForSlots.length >= fallbackIndex * 2 + 2
+              ) {
+                const seedPos =
+                  seedOrderForSlots[side === "A" ? fallbackIndex * 2 : fallbackIndex * 2 + 1];
+                if (typeof seedPos === "number") {
+                  slotPosition = seedPos;
+                }
+              }
+            }
+            if (slotPosition == null) {
+              setError("No se pudo identificar el slot");
+              return;
+            }
+            const entrantId = selectedId === "__BYE__" ? null : selectedId;
+            await handleSlotAssign(category.id, slotPosition, entrantId);
+          };
           
 
           return (
@@ -897,13 +1218,28 @@ export default function TournamentPlayoffs({
                   <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-600">
                     Clasifican: {qualifiedCount}
                   </span>
-                  {bracketSize && (
-                    <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-600">
-                      Llave de {bracketSize}
-                    </span>
+          {derivedBracketSize && (
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold text-slate-600">
+              Llave de {derivedBracketSize}
+            </span>
+          )}
+                  <span
+                    className={`rounded-full px-3 py-1 text-[11px] font-semibold ${statusInfo.classes}`}
+                  >
+                    {statusInfo.label}
+                  </span>
+                  {bracketState === "DRAFT" && (
+                    <button
+                      type="button"
+                      onClick={() => handleLockCategory(category.id)}
+                      disabled={lockingCategory === category.id}
+                      className="rounded-full border border-amber-200 bg-white px-3 py-1.5 text-xs font-semibold text-amber-700 shadow-sm transition hover:border-amber-300 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {lockingCategory === category.id ? "Bloqueando..." : "Bloquear llaves"}
+                    </button>
                   )}
                   <span className="rounded-full bg-indigo-50 px-3 py-1 text-[11px] font-semibold text-indigo-700">
-                    Arrastra para mover
+                    Selecciona en la llave
                   </span>
                   <button
                     type="button"
@@ -947,14 +1283,32 @@ export default function TournamentPlayoffs({
               <div className="rounded-[32px] border border-slate-100 bg-gradient-to-br from-white via-slate-50 to-white p-4 shadow-[0_20px_60px_-45px_rgba(15,23,42,0.35)]">
                 <BracketCanvas
                   categoryId={category.id}
-                  matches={mainMatches}
+                  matches={mainMatchesForBracket}
+                  bronzeMatches={bronzeMatches}
                   roundNumbers={roundNumbers}
                   roundLabelMap={labelMap}
-                  bracketSize={bracketSize}
+                  bracketSize={derivedBracketSize ?? undefined}
                   registrationMap={registrationMap}
                   labelByRegistration={labelForBracket}
-                  onSwapSides={handleSwapSides}
-                  disableSwap={swapping}
+                  swapMode="select"
+                  selectableRegistrationIds={
+                    canEditSlots
+                      ? qualifiedRegistrations.map(
+                          (registration) => registration.id
+                        )
+                      : []
+                  }
+                  onSelectSwap={handleSelectChange}
+                  disableSwap={swapping || !canEditSlots}
+                  occupiedRegistrationIds={occupiedRegistrationIds}
+                  bracketState={
+                    bracketState === "DRAFT"
+                      ? "draft"
+                      : bracketState === "LOCKED"
+                      ? "locked"
+                      : "published"
+                  }
+                  className="relative max-h-[80vh] min-h-[480px] overflow-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-sm"
                 />
               </div>
             </>
@@ -977,11 +1331,6 @@ export default function TournamentPlayoffs({
     </div>
   );
 }
-
-
-
-
-
 
 
 

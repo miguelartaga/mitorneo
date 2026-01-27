@@ -105,5 +105,17 @@ export async function PATCH(
     select: { playoffsPublished: true },
   });
 
+  if (published) {
+    await prisma.tournamentCategory.updateMany({
+      where: { tournamentId, playoffStatus: "LOCKED" },
+      data: { playoffStatus: "PUBLISHED" },
+    });
+  } else {
+    await prisma.tournamentCategory.updateMany({
+      where: { tournamentId, playoffStatus: "PUBLISHED" },
+      data: { playoffStatus: "LOCKED" },
+    });
+  }
+
   return NextResponse.json({ playoffsPublished: updated.playoffsPublished });
 }

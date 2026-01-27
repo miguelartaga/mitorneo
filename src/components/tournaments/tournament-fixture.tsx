@@ -180,7 +180,27 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
     loadData();
   }, [tournamentId]);
 
-  const groupCategories = useMemo(
+  const groupCategories = useMemo(() => {
+    const categoriesWithMatches = new Set(
+      matches
+        .filter((match) => !match.stage || match.stage === "GROUP")
+        .map((match) => match.categoryId)
+    );
+    const categoriesWithGroups = new Set(
+      registrations
+        .filter((registration) => registration.groupName)
+        .map((registration) => registration.categoryId)
+    );
+
+    return categories.filter(
+      (category) =>
+        groupDrawTypes.has(category.drawType) ||
+        categoriesWithMatches.has(category.id) ||
+        categoriesWithGroups.has(category.id)
+    );
+  }, [categories, matches, registrations]);
+
+  const groupActionCategories = useMemo(
     () => categories.filter((category) => groupDrawTypes.has(category.drawType)),
     [categories]
   );
@@ -280,7 +300,7 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
   };
 
   const generateAllFixtures = async () => {
-    if (groupCategories.length === 0) return;
+    if (groupActionCategories.length === 0) return;
     if (tournamentStatus === "WAITING") {
       setShowPaymentModal(true);
       return;
@@ -290,7 +310,7 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
     setMessage(null);
 
     try {
-      for (const category of groupCategories) {
+      for (const category of groupActionCategories) {
         const categoryRegistrations =
           registrationsByCategory.get(category.id) ?? [];
         if (categoryRegistrations.length < 2) continue;
@@ -522,7 +542,7 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
             <button
               type="button"
               onClick={generateAllFixtures}
-              disabled={generatingAll || groupCategories.length === 0}
+              disabled={generatingAll || groupActionCategories.length === 0}
               className="inline-flex items-center justify-center rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-[0_14px_32px_-18px_rgba(79,70,229,0.45)] transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {generatingAll ? "Generando..." : "Generar fixture"}
@@ -572,6 +592,7 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
         groupCategories.map((category) => {
           const categoryRegistrations =
             registrationsByCategory.get(category.id) ?? [];
+          const canAutoGroup = groupDrawTypes.has(category.drawType);
           const groupMap = new Map<string, Registration[]>();
           categoryRegistrations.forEach((registration) => {
             const groupKey = getGroupKey(registration.groupName);
@@ -602,6 +623,7 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
                   type="button"
                   onClick={() => autoGroups(category.id)}
                   disabled={
+                    !canAutoGroup ||
                     autoGroupingId === category.id ||
                     categoryRegistrations.length === 0
                   }

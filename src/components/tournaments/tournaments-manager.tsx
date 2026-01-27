@@ -316,6 +316,10 @@ export default function TournamentsManager({
       const Quill = QuillModule.default ?? QuillModule;
       const Font = Quill.import("formats/font");
       Font.whitelist = [
+        "calibri",
+        "arial",
+        "times-new-roman",
+        "georgia",
         "merriweather",
         "playfair-display",
         "cormorant-garamond",
@@ -324,9 +328,9 @@ export default function TournamentsManager({
         "sans-serif",
       ];
       Quill.register(Font, true);
-      const Size = Quill.import("formats/size");
-      Size.whitelist = ["small", "normal", "large", "huge"];
-      Quill.register(Size, true);
+      const SizeStyle = Quill.import("attributors/style/size");
+      SizeStyle.whitelist = ["12px", "14px", "16px", "18px", "20px", "24px", "32px"];
+      Quill.register(SizeStyle, true);
 
       const host = rulesEditorRef.current;
       if (!host) return;
@@ -339,7 +343,7 @@ export default function TournamentsManager({
         placeholder: "Escribe las reglas del torneo...",
         modules: {
           toolbar: [
-            [{ font: Font.whitelist }, { size: Size.whitelist }],
+            [{ font: Font.whitelist }, { size: SizeStyle.whitelist }],
             ["bold", "italic", "underline", "strike"],
             [{ color: [] }, { background: [] }],
             [{ list: "ordered" }, { list: "bullet" }],

@@ -11,22 +11,22 @@ datasource db {
 }
 
 model User {
-  id            String       @id @default(cuid())
-  name          String?
-  email         String       @unique
-  phone         String?
-  passwordHash  String
-  role          Role         @default(TOURNAMENT_ADMIN)
-  emailVerified DateTime?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  accounts      Account[]
-  sessions      Session[]
-  tournaments   Tournament[] @relation("TournamentOwner")
-  leagues       League[]     @relation("LeagueOwner")
-  createdPlayers Player[]    @relation("PlayerCreator")
-  createdCategories Category[] @relation("CategoryCreator")
-  leaguePermissions LeaguePermission[]
+  id                    String                 @id @default(cuid())
+  name                  String?
+  email                 String                 @unique
+  phone                 String?
+  passwordHash          String
+  role                  Role                   @default(TOURNAMENT_ADMIN)
+  emailVerified         DateTime?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  accounts              Account[]
+  sessions              Session[]
+  tournaments           Tournament[]           @relation("TournamentOwner")
+  leagues               League[]               @relation("LeagueOwner")
+  createdPlayers        Player[]               @relation("PlayerCreator")
+  createdCategories     Category[]             @relation("CategoryCreator")
+  leaguePermissions     LeaguePermission[]
   tournamentPermissions TournamentPermission[]
 }
 
@@ -137,6 +137,12 @@ enum MatchOutcomeType {
   INJURY
 }
 
+enum PlayoffStatus {
+  DRAFT
+  LOCKED
+  PUBLISHED
+}
+
 enum RegistrationRankingType {
   LEAGUE
   TOURNAMENT
@@ -158,27 +164,27 @@ model Sport {
 }
 
 model Tournament {
-  id                   String    @id @default(cuid())
+  id                   String           @id @default(cuid())
   name                 String
   description          String?
   sportId              String?
   leagueId             String?
-  photoUrl             String?   @db.Text
+  photoUrl             String?          @db.Text
   address              String?
   startDate            DateTime?
   endDate              DateTime?
   registrationDeadline DateTime?
-  rulesText            String?   @db.Text
+  rulesText            String?          @db.Text
   playDays             Json?
-  rankingEnabled       Boolean   @default(true)
-  paymentRate          Decimal   @default(0) @db.Decimal(10, 2)
-  schedulePublished    Boolean   @default(false)
-  groupsPublished      Boolean   @default(false)
-  playoffsPublished    Boolean   @default(false)
+  rankingEnabled       Boolean          @default(true)
+  paymentRate          Decimal          @default(0) @db.Decimal(10, 2)
+  schedulePublished    Boolean          @default(false)
+  groupsPublished      Boolean          @default(false)
+  playoffsPublished    Boolean          @default(false)
   status               TournamentStatus @default(WAITING)
   ownerId              String
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
 
   sport           Sport?                     @relation(fields: [sportId], references: [id])
   league          League?                    @relation(fields: [leagueId], references: [id])
@@ -194,6 +200,7 @@ model Tournament {
   scheduleDays    TournamentScheduleDay[]
   sponsors        TournamentSponsor[]
   permissions     TournamentPermission[]
+  playoffSlots    PlayoffSlot[]
 }
 
 model GlobalSetting {
@@ -286,11 +293,32 @@ model TournamentCategory {
   groupMaxSize    Int?
   groupQualifiers Int                 @default(2)
   hasBronzeMatch  Boolean             @default(false)
+  playoffStatus   PlayoffStatus       @default(DRAFT)
 
-  tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
-  category   Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  tournament   Tournament    @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  category     Category      @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  playoffSlots PlayoffSlot[]
 
   @@id([tournamentId, categoryId])
+}
+
+model PlayoffSlot {
+  id           String   @id @default(cuid())
+  tournamentId String
+  categoryId   String
+  bracketId    String?
+  position     Int
+  entrantId    String?
+  locked       Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tournament Tournament              @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  category   TournamentCategory      @relation(fields: [tournamentId, categoryId], references: [tournamentId, categoryId], onDelete: Cascade)
+  entrant    TournamentRegistration? @relation(fields: [entrantId], references: [id], onDelete: SetNull)
+
+  @@unique([tournamentId, categoryId, position])
+  @@index([entrantId])
 }
 
 model TournamentScheduleDay {
@@ -350,6 +378,7 @@ model TournamentRegistration {
   partnerTwo     Player?           @relation("RegistrationPartnerTwo", fields: [partnerTwoId], references: [id], onDelete: SetNull)
   matchesAsTeamA TournamentMatch[] @relation("MatchTeamA")
   matchesAsTeamB TournamentMatch[] @relation("MatchTeamB")
+  playoffSlots   PlayoffSlot[]
 
   @@index([tournamentId])
   @@index([categoryId])
@@ -368,6 +397,7 @@ model TournamentMatch {
   outcomeType   MatchOutcomeType     @default(PLAYED)
   outcomeSide   MatchWinnerSide?
   roundNumber   Int?
+  orderHint     Int?
   scheduledDate DateTime?            @db.Date
   startTime     String?
   games         Json?
@@ -453,18 +483,18 @@ model Player {
 }
 
 model PlayerRanking {
-  id        String   @id @default(cuid())
-  playerId  String
-  leagueId  String
-  seasonId  String
+  id         String   @id @default(cuid())
+  playerId   String
+  leagueId   String
+  seasonId   String
   categoryId String
-  points    Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  points     Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  player Player @relation(fields: [playerId], references: [id], onDelete: Cascade)
-  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
-  season Season @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  player   Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  league   League   @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  season   Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
   category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@unique([playerId, leagueId, seasonId, categoryId])
@@ -475,18 +505,18 @@ model PlayerRanking {
 }
 
 model League {
-  id          String       @id @default(cuid())
-  name        String       @unique
+  id          String          @id @default(cuid())
+  name        String          @unique
   description String?
-  photoUrl    String?      @db.Text
+  photoUrl    String?         @db.Text
   ownerId     String?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
   seasons     Season[]
   tournaments Tournament[]
   rankings    PlayerRanking[]
 
-  owner User? @relation("LeagueOwner", fields: [ownerId], references: [id])
+  owner       User?              @relation("LeagueOwner", fields: [ownerId], references: [id])
   permissions LeaguePermission[]
 }
 
@@ -499,7 +529,7 @@ model Season {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  league League @relation(fields: [leagueId], references: [id], onDelete: Cascade)
+  league   League          @relation(fields: [leagueId], references: [id], onDelete: Cascade)
   rankings PlayerRanking[]
 
   @@unique([leagueId, name])

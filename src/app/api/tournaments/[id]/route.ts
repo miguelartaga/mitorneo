@@ -427,6 +427,21 @@ export async function PATCH(
     );
   }
 
+  const existingTournamentCategories = await prisma.tournamentCategory.findMany({
+    where: { tournamentId: tournament.id },
+    select: {
+      categoryId: true,
+      drawType: true,
+      groupMinSize: true,
+      groupMaxSize: true,
+      groupQualifiers: true,
+      hasBronzeMatch: true,
+    },
+  });
+  const tournamentCategoryById = new Map(
+    existingTournamentCategories.map((entry) => [entry.categoryId, entry])
+  );
+
   const existingCategories = await prisma.category.findMany({
     where: {
       id: { in: normalizedCategoryEntries.map((entry) => entry.categoryId) },
@@ -524,6 +539,7 @@ export async function PATCH(
         categories: {
           deleteMany: {},
           create: normalizedCategoryEntries.map((entry) => ({
+            ...tournamentCategoryById.get(entry.categoryId),
             categoryId: entry.categoryId,
             price: entry.price,
             secondaryPrice: entry.secondaryPrice,
