@@ -9,6 +9,8 @@ import {
   type TournamentRankingData,
   type StandingEntry,
 } from "@/lib/ranking";
+import { buildSlotPositionMap } from "@/lib/playoff-match-utils";
+import { buildSeedOrder } from "@/lib/playoff-utils";
 
 import {
   type TournamentPublicData,
@@ -21,6 +23,7 @@ import {
   type TournamentCategory,
   type Prize,
   type ParticipantRow,
+  type PlayoffSlotPublic,
 } from "@/types/tournament-public";
 
 type TabKey =
@@ -245,6 +248,9 @@ export default function TournamentPublic({
   const [matches, setMatches] = useState<Match[]>(
     Array.isArray(tournament.matches) ? tournament.matches : []
   );
+  const [playoffSlots, setPlayoffSlots] = useState<PlayoffSlotPublic[]>(
+    Array.isArray(tournament.playoffSlots) ? tournament.playoffSlots : []
+  );
   const [matchesError, setMatchesError] = useState<string | null>(null);
   const schedulePublished = Boolean(tournament.schedulePublished);
   const groupsPublished = Boolean(tournament.groupsPublished);
@@ -310,6 +316,9 @@ export default function TournamentPublic({
         }
         if (!active) return;
         setMatches(Array.isArray(data.matches) ? data.matches : []);
+        if (Array.isArray(data.playoffSlots)) {
+          setPlayoffSlots(data.playoffSlots);
+        }
         setMatchesError(null);
       } catch (err) {
         if (!active) return;
@@ -472,6 +481,7 @@ export default function TournamentPublic({
     ? tournament.registrations
     : [];
   const safeMatches = Array.isArray(matches) ? matches : [];
+  const safePlayoffSlots = Array.isArray(playoffSlots) ? playoffSlots : [];
 
   const standingsByCategory = useMemo(() => {
     const data: TournamentRankingData = {
@@ -563,12 +573,78 @@ export default function TournamentPublic({
     return result;
   }, [standingsByCategory, categoriesById, tournament.categories]);
 
+  const slotMapByCategory = useMemo(() => {
+    const map = new Map<string, PlayoffSlotPublic[]>();
+    safePlayoffSlots.forEach((slot) => {
+      const list = map.get(slot.categoryId) ?? [];
+      list.push(slot);
+      map.set(slot.categoryId, list);
+    });
+    map.forEach((list) => list.sort((a, b) => a.position - b.position));
+    return map;
+  }, [safePlayoffSlots]);
+
+  const slotPositionMapByCategory = useMemo(() => {
+    const map = new Map<string, Map<string, number>>();
+    slotMapByCategory.forEach((slots, categoryId) => {
+      const matchesForCategory = safeMatches.filter(
+        (match) => match.stage === "PLAYOFF" && match.categoryId === categoryId
+      );
+      const mapping = buildSlotPositionMap({
+        slots: slots.map((slot) => ({
+          position: slot.position,
+          entrantId: slot.entrantId ?? null,
+        })),
+        matches: matchesForCategory.map((match) => ({
+          id: match.id,
+          roundNumber: match.roundNumber ?? null,
+          createdAt: match.createdAt ?? null,
+          teamAId: match.teamAId ?? null,
+          teamBId: match.teamBId ?? null,
+        })),
+      });
+      map.set(categoryId, mapping);
+    });
+    return map;
+  }, [slotMapByCategory, safeMatches]);
+
+  const playoffRoundLabels = useMemo(() => {
+    const map = new Map<string, Map<number, string>>();
+    const matchesByCategory = new Map<string, Match[]>();
+    safeMatches
+      .filter((match) => match.stage === "PLAYOFF")
+      .forEach((match) => {
+        const list = matchesByCategory.get(match.categoryId) ?? [];
+        list.push(match);
+        matchesByCategory.set(match.categoryId, list);
+      });
+    matchesByCategory.forEach((list, categoryId) => {
+      const roundCounts = new Map<number, number>();
+      list.forEach((match) => {
+        const round = match.roundNumber ?? 1;
+        roundCounts.set(round, (roundCounts.get(round) ?? 0) + 1);
+      });
+      const rounds = Array.from(roundCounts.keys()).sort((a, b) => a - b);
+      if (rounds.length === 0) return;
+      const firstRound = rounds[0];
+      const firstCount = roundCounts.get(firstRound) ?? 0;
+      const bracketSize = firstCount * 2;
+      const labelMap = new Map<number, string>();
+      rounds.forEach((round) => {
+        const roundSize = Math.round(bracketSize / 2 ** (round - firstRound));
+        labelMap.set(round, formatPlayoffRoundLabel(roundSize, round));
+      });
+      map.set(categoryId, labelMap);
+    });
+    return map;
+  }, [safeMatches]);
+
   const playoffBrackets = useMemo(() => {
     const map = new Map<
       string,
       { category: Category; matches: Match[]; bronzeMatches: Match[] }
     >();
-    matches
+    safeMatches
       .filter((match) => match.stage === "PLAYOFF")
       .forEach((match) => {
         const category =
@@ -608,44 +684,94 @@ export default function TournamentPublic({
     };
 
     return Array.from(map.values()).map((entry) => {
-      const drawType = categoryDrawTypeById.get(entry.category.id) ?? null;
-      const isWaiting =
-        drawType === "GROUPS_PLAYOFF" &&
-        !(groupStageCompleteByCategory.get(entry.category.id) ?? false);
-      const bracketMatches = isWaiting
-        ? entry.matches.map((match) => ({
-          ...match,
-          teamAId: null,
-          teamBId: null,
-          teamA: null,
-          teamB: null,
-        }))
-        : entry.matches;
+      const slotEntries = slotMapByCategory.get(entry.category.id) ?? [];
+      const slotPositionMap =
+        slotPositionMapByCategory.get(entry.category.id) ?? new Map();
       const roundNumbers = Array.from(
         new Set(
-          bracketMatches
+          entry.matches
             .map((match) => match.roundNumber ?? 1)
             .filter((round) => typeof round === "number")
         )
       ).sort((a, b) => a - b);
-      const bracketSize = deriveBracketSizeFromMatches(bracketMatches);
+      const firstRoundNumber = roundNumbers[0] ?? 1;
+      const derivedBracketSize =
+        slotEntries.length > 0
+          ? slotEntries.length
+          : deriveBracketSizeFromMatches(entry.matches);
+      const seedOrder =
+        derivedBracketSize && derivedBracketSize > 0
+          ? buildSeedOrder(derivedBracketSize)
+          : [];
+      const orderMap = new Map<string, number>();
+      for (let i = 0; i < seedOrder.length; i += 2) {
+        const seedA = seedOrder[i];
+        const seedB = seedOrder[i + 1];
+        if (!seedA || !seedB) continue;
+        orderMap.set(`${seedA}|${seedB}`, i / 2);
+        orderMap.set(`${seedB}|${seedA}`, i / 2);
+      }
+      const expectedRounds =
+        derivedBracketSize && derivedBracketSize > 1
+          ? Math.max(1, Math.round(Math.log2(derivedBracketSize)))
+          : roundNumbers.length;
+      const missingRounds = Math.max(0, expectedRounds - roundNumbers.length);
+      const normalizedRoundNumbers =
+        missingRounds > 0
+          ? [
+            ...Array.from({ length: missingRounds }, (_, index) =>
+              Math.max(1, firstRoundNumber - missingRounds + index)
+            ),
+            ...roundNumbers,
+          ]
+          : roundNumbers;
+
+      const matchesForBracket = entry.matches.map((match) => {
+        const round = match.roundNumber ?? firstRoundNumber;
+        if (round !== firstRoundNumber) return match;
+        const posA = slotPositionMap.get(`${match.id}:A`);
+        const posB = slotPositionMap.get(`${match.id}:B`);
+        const orderHint =
+          typeof posA === "number" && typeof posB === "number"
+            ? orderMap.get(`${posA}|${posB}`)
+            : undefined;
+        if (typeof orderHint === "number") {
+          return { ...match, orderHint };
+        }
+        return match;
+      });
       const matchStatusByMatchId = new Map<string, string>();
-      bracketMatches.forEach((match) => {
+      matchesForBracket.forEach((match) => {
         const score = formatMatchScore(match, getMatchCategory(match));
         if (score) {
           matchStatusByMatchId.set(match.id, score);
         }
       });
+      const labelMap = playoffRoundLabels.get(entry.category.id);
+      const useLabelMap =
+        labelMap &&
+        normalizedRoundNumbers.every((round) => labelMap.has(round))
+          ? labelMap
+          : undefined;
       return {
         category: entry.category,
-        matches: bracketMatches,
+        matches: matchesForBracket,
         bronzeMatches: entry.bronzeMatches,
-        roundNumbers,
-        bracketSize,
+        roundNumbers: normalizedRoundNumbers,
+        bracketSize: derivedBracketSize,
         matchStatusByMatchId,
+        roundLabelMap: useLabelMap,
       };
     });
-  }, [matches, categoriesById, tournament.categories, categoryDrawTypeById, groupStageCompleteByCategory]);
+  }, [
+    safeMatches,
+    categoriesById,
+    tournament.categories,
+    categoryDrawTypeById,
+    slotMapByCategory,
+    slotPositionMapByCategory,
+    playoffRoundLabels,
+  ]);
 
   const bracketSizeByCategory = useMemo(() => {
     const map = new Map<string, number>();
@@ -1055,6 +1181,7 @@ export default function TournamentPublic({
                       matches={entry.matches}
                       bronzeMatches={entry.bronzeMatches}
                       roundNumbers={entry.roundNumbers}
+                      roundLabelMap={entry.roundLabelMap}
                       bracketSize={entry.bracketSize}
                       registrationMap={registrationMap}
                       labelByRegistration={labelByRegistration}

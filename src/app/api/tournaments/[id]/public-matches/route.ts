@@ -40,6 +40,9 @@ export async function GET(
       groupName: true,
       stage: true,
       roundNumber: true,
+      orderHint: true,
+      createdAt: true,
+      orderHint: true,
       isBronzeMatch: true,
       scheduledDate: true,
       startTime: true,
@@ -80,6 +83,12 @@ export async function GET(
     ],
   });
 
+  const playoffSlots = await prisma.playoffSlot.findMany({
+    where: { tournamentId },
+    select: { categoryId: true, position: true, entrantId: true },
+    orderBy: { position: "asc" },
+  });
+
   return NextResponse.json({
     matches: matches.map((match) => ({
       id: match.id,
@@ -88,6 +97,9 @@ export async function GET(
       groupName: match.groupName ?? null,
       stage: match.stage,
       roundNumber: match.roundNumber ?? null,
+      orderHint: match.orderHint ?? null,
+      createdAt: match.createdAt.toISOString(),
+      orderHint: match.orderHint ?? null,
       isBronzeMatch: match.isBronzeMatch ?? null,
       scheduledDate: toDateOnly(match.scheduledDate),
       startTime: match.startTime,
@@ -102,6 +114,11 @@ export async function GET(
       teamB: match.teamB,
       club: match.club,
       courtNumber: match.courtNumber ?? null,
+    })),
+    playoffSlots: playoffSlots.map((slot) => ({
+      categoryId: slot.categoryId,
+      position: slot.position,
+      entrantId: slot.entrantId ?? null,
     })),
   });
 }

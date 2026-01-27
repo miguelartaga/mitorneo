@@ -152,6 +152,14 @@ export default async function TournamentPublicPage({
           },
         },
       },
+      playoffSlots: {
+        select: {
+          categoryId: true,
+          position: true,
+          entrantId: true,
+        },
+        orderBy: { position: "asc" },
+      },
       prizes: {
         orderBy: [{ categoryId: "asc" }, { placeFrom: "asc" }],
         include: {
@@ -223,16 +231,18 @@ export default async function TournamentPublicPage({
       partnerTwo: registration.partnerTwo,
       createdAt: registration.createdAt.toISOString(),
     })),
-    matches: tournament.matches.map((match) => ({
-      id: match.id,
-      categoryId: match.categoryId,
-      groupName: match.groupName,
-      stage: match.stage,
-      isBronzeMatch: match.isBronzeMatch,
-      roundNumber: match.roundNumber,
-      scheduledDate: toISOStringOrNull(match.scheduledDate),
-      startTime: match.startTime,
-      courtNumber: match.courtNumber,
+      matches: tournament.matches.map((match) => ({
+        id: match.id,
+        categoryId: match.categoryId,
+        groupName: match.groupName,
+        stage: match.stage,
+        isBronzeMatch: match.isBronzeMatch,
+        roundNumber: match.roundNumber,
+        orderHint: match.orderHint ?? null,
+        createdAt: match.createdAt.toISOString(),
+        scheduledDate: toISOStringOrNull(match.scheduledDate),
+        startTime: match.startTime,
+        courtNumber: match.courtNumber,
       club: match.club,
       games: match.games,
       liveState: match.liveState as any,
@@ -256,9 +266,9 @@ export default async function TournamentPublicPage({
           createdAt: match.teamA.createdAt.toISOString(),
         }
         : null,
-      teamB: match.teamB
-        ? {
-          id: match.teamB.id,
+        teamB: match.teamB
+          ? {
+            id: match.teamB.id,
           categoryId: match.teamB.categoryId,
           playerId: match.teamB.player.id,
           teamName: match.teamB.teamName,
@@ -270,6 +280,11 @@ export default async function TournamentPublicPage({
           createdAt: match.teamB.createdAt.toISOString(),
         }
         : null,
+    })),
+    playoffSlots: tournament.playoffSlots.map((slot) => ({
+      categoryId: slot.categoryId,
+      position: slot.position,
+      entrantId: slot.entrantId ?? null,
     })),
     prizes: tournament.prizes.map((prize) => ({
       id: prize.id,

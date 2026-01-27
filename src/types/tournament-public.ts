@@ -59,6 +59,8 @@ export type Match = {
     stage: string;
     isBronzeMatch?: boolean | null;
     roundNumber?: number | null;
+    orderHint?: number | null;
+    createdAt?: string | null;
     scheduledDate?: string | null;
     startTime?: string | null;
     courtNumber?: number | null;
@@ -77,6 +79,12 @@ export type Match = {
     teamA?: Registration | null;
     teamB?: Registration | null;
     category?: Category | null;
+};
+
+export type PlayoffSlotPublic = {
+    categoryId: string;
+    position: number;
+    entrantId?: string | null;
 };
 
 export type Prize = {
@@ -112,6 +120,7 @@ export type TournamentPublicData = {
     categories: TournamentCategory[];
     registrations: Registration[];
     matches: Match[];
+    playoffSlots?: PlayoffSlotPublic[];
     prizes: Prize[];
     groupPoints?: {
         winPoints: number;
