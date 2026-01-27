@@ -97,6 +97,9 @@ const buildBracketData = ({
   matchStatusByMatchId,
   bracketState,
 }: BracketBuildParams) => {
+  const safeMatches = Array.isArray(matches) ? matches : [];
+  const safeBronzeMatches = Array.isArray(bronzeMatches) ? bronzeMatches : [];
+  const safeRoundNumbers = Array.isArray(roundNumbers) ? roundNumbers : [];
   const contestants: Record<string, BracketContestant> = {};
   const ensureRegistrationContestant = (id: string) => {
     if (contestants[id]) return;
@@ -115,14 +118,16 @@ const buildBracketData = ({
       players: [{ title }],
     };
   };
-  const allMatches = [...matches, ...(bronzeMatches ?? [])];
+  const allMatches = [...safeMatches, ...safeBronzeMatches];
   allMatches.forEach((match) => {
     if (match.teamAId) ensureRegistrationContestant(match.teamAId);
     if (match.teamBId) ensureRegistrationContestant(match.teamBId);
   });
 
   const normalizedRoundNumbers =
-    roundNumbers.length > 0 ? roundNumbers : [matches[0]?.roundNumber ?? 1];
+    safeRoundNumbers.length > 0
+      ? safeRoundNumbers
+      : [safeMatches[0]?.roundNumber ?? 1];
   const roundIndexMap = new Map<number, number>();
   normalizedRoundNumbers.forEach((roundNumber, index) => {
     roundIndexMap.set(roundNumber, index);
@@ -141,7 +146,7 @@ const buildBracketData = ({
   });
 
   const orderTracker = new Map<number, number>();
-  const bracketMatches: BracketMatchEntry[] = matches
+  const bracketMatches: BracketMatchEntry[] = safeMatches
     .slice()
     .sort((a, b) => {
       const roundA =

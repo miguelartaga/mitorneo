@@ -1,9 +1,9 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { BracketCanvas } from "@/components/tournaments/bracket-canvas";
 import TournamentPublicFixture from "@/components/tournaments/tournament-public-fixture";
+import TournamentPublicParticipants from "@/components/tournaments/tournament-public-participants";
 import {
   computeTournamentStandingsByCategory,
   type TournamentRankingData,
@@ -20,6 +20,7 @@ import {
   type Club,
   type TournamentCategory,
   type Prize,
+  type ParticipantRow,
 } from "@/types/tournament-public";
 
 type TabKey =
@@ -241,13 +242,10 @@ export default function TournamentPublic({
   const [tab, setTab] = useState<TabKey>("info");
   const [themeMode, setThemeMode] = useState<"light" | "dark">("light");
   const [participantQuery, setParticipantQuery] = useState("");
-  const [participantDraft, setParticipantDraft] = useState("");
-  const [fixtureQuery, setFixtureQuery] = useState("");
-  const [fixtureCategory, setFixtureCategory] = useState("all");
-  const [fixtureTime, setFixtureTime] = useState("");
-  const [matches, setMatches] = useState<Match[]>(tournament.matches);
+  const [matches, setMatches] = useState<Match[]>(
+    Array.isArray(tournament.matches) ? tournament.matches : []
+  );
   const [matchesError, setMatchesError] = useState<string | null>(null);
-  const [expandedTeams, setExpandedTeams] = useState<Set<string>>(new Set());
   const schedulePublished = Boolean(tournament.schedulePublished);
   const groupsPublished = Boolean(tournament.groupsPublished);
   const playoffsPublished = Boolean(tournament.playoffsPublished);
@@ -337,24 +335,11 @@ export default function TournamentPublic({
     return map;
   }, [tournament.categories]);
 
-  const categoryOptions = useMemo(() => {
-    const list = Array.from(categoriesById.values());
-    list.sort((a, b) => a.name.localeCompare(b.name));
-    return list;
-  }, [categoriesById]);
-
   const getMatchCategory = (match: Match) =>
     categoriesById.get(match.categoryId) ??
     tournament.categories.find((entry) => entry.categoryId === match.categoryId)
       ?.category ??
     null;
-
-  const normalizeText = (value: string) =>
-    value
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .trim();
 
   const categoryDrawTypeById = useMemo(() => {
     const map = new Map<string, string | null>();
@@ -388,14 +373,7 @@ export default function TournamentPublic({
   const normalizedParticipantQuery = participantQuery.trim().toLowerCase();
 
   const participantRows = useMemo(() => {
-    const rows: {
-      id: string;
-      player: Player;
-      category: Category;
-      teamName: string | null;
-      location: string;
-      createdAt: string;
-    }[] = [];
+    const rows: ParticipantRow[] = [];
 
     tournament.registrations.forEach((registration) => {
       const category =
@@ -487,13 +465,21 @@ export default function TournamentPublic({
     });
   }, [tournament.registrations, categoriesById, tournament.categories]);
 
+  const safeCategories = Array.isArray(tournament.categories)
+    ? tournament.categories
+    : [];
+  const safeRegistrations = Array.isArray(tournament.registrations)
+    ? tournament.registrations
+    : [];
+  const safeMatches = Array.isArray(matches) ? matches : [];
+
   const standingsByCategory = useMemo(() => {
     const data: TournamentRankingData = {
-      categories: tournament.categories.map((entry) => ({
+      categories: safeCategories.map((entry) => ({
         categoryId: entry.categoryId,
         drawType: undefined,
       })),
-      registrations: tournament.registrations.map((registration) => ({
+      registrations: safeRegistrations.map((registration) => ({
         id: registration.id,
         categoryId: registration.categoryId,
         groupName: registration.groupName ?? null,
@@ -504,7 +490,7 @@ export default function TournamentPublic({
         partnerId: registration.partnerId ?? null,
         partnerTwoId: registration.partnerTwoId ?? null,
       })),
-      matches: matches.map((match) => ({
+      matches: safeMatches.map((match) => ({
         categoryId: match.categoryId,
         groupName: match.groupName ?? null,
         stage: match.stage as TournamentRankingData["matches"][number]["stage"],
@@ -520,12 +506,14 @@ export default function TournamentPublic({
       groupPoints: tournament.groupPoints ?? null,
       rankingPoints: [],
     };
-    return computeTournamentStandingsByCategory(data);
-  }, [tournament.categories, tournament.registrations, matches, tournament.groupPoints]);
+    const computed = computeTournamentStandingsByCategory(data);
+    return computed instanceof Map ? computed : new Map<string, StandingEntry[]>();
+  }, [safeCategories, safeRegistrations, safeMatches, tournament.groupPoints]);
 
   const labelByRegistration = useMemo(() => {
     const map = new Map<string, string>();
     standingsByCategory.forEach((entries) => {
+      if (!Array.isArray(entries)) return;
       const groupMap = new Map<string, typeof entries>();
       entries.forEach((entry) => {
         const groupKey = entry.groupName ?? "A";
@@ -552,9 +540,10 @@ export default function TournamentPublic({
     }[] = [];
 
     standingsByCategory.forEach((entries, categoryId) => {
+      if (!Array.isArray(entries)) return;
       const category =
         categoriesById.get(categoryId) ??
-        tournament.categories.find((entry) => entry.categoryId === categoryId)?.category;
+        safeCategories.find((entry) => entry.categoryId === categoryId)?.category;
       if (!category) return;
       const groupMap = new Map<string, typeof entries>();
       entries.forEach((entry) => {
@@ -676,51 +665,6 @@ export default function TournamentPublic({
     return map;
   }, [playoffBrackets]);
 
-  const fixtureMatches = useMemo(() => {
-    const query = normalizeText(fixtureQuery);
-    const timeFilter = fixtureTime.trim();
-    const categoryFilter = fixtureCategory !== "all" ? fixtureCategory : null;
-
-    return matches.filter((match) => {
-      if (categoryFilter && match.categoryId !== categoryFilter) return false;
-      if (timeFilter && !(match.startTime ?? "").startsWith(timeFilter)) {
-        return false;
-      }
-      if (!query) return true;
-      const category = getMatchCategory(match);
-      const safePlayoffLabel = match.stage === "PLAYOFF"
-        ? match.isBronzeMatch
-          ? "Bronce"
-          : "Playoff"
-        : match.groupName ?? "";
-      const textParts = [
-        category?.name ?? "",
-        category?.abbreviation ?? "",
-        teamLabel(match.teamA),
-        teamMembersLabel(match.teamA),
-        teamLabel(match.teamB),
-        teamMembersLabel(match.teamB),
-        match.groupName ?? "",
-        safePlayoffLabel,
-        match.startTime ?? "",
-      ];
-      const haystack = normalizeText(textParts.join(" "));
-      return haystack.includes(query);
-    });
-  }, [matches, fixtureQuery, fixtureCategory, fixtureTime]);
-
-  const fixtureMatchesByDate = useMemo(() => {
-    const map = new Map<string, Match[]>();
-    fixtureMatches.forEach((match) => {
-      const dateKey = match.scheduledDate
-        ? match.scheduledDate.split("T")[0]
-        : "sin-fecha";
-      const list = map.get(dateKey) ?? [];
-      list.push(match);
-      map.set(dateKey, list);
-    });
-    return map;
-  }, [fixtureMatches]);
 
   const resultMatches = useMemo(
     () =>
@@ -989,120 +933,12 @@ export default function TournamentPublic({
           </section>
         )}
 
-{tab === "participants" && (
-          <section className="mt-8 space-y-6">
-            <div className="flex flex-wrap items-center gap-3 rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
-              <div className="flex-1">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
-                  Filtrar participantes
-                </p>
-                <input
-                  type="text"
-                  value={participantDraft}
-                  onChange={(e) => setParticipantDraft(e.target.value)}
-                  placeholder="Equipo, jugador, ciudad o pais"
-                  className="mt-2 w-full rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-2 text-sm text-slate-100 placeholder:text-slate-400 focus:border-cyan-300 focus:outline-none"
-                />
-              </div>
-              <div className="flex items-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setParticipantQuery(participantDraft)}
-                  className="rounded-full bg-cyan-400/90 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-900"
-                >
-                  Filtrar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setParticipantDraft("");
-                    setParticipantQuery("");
-                  }}
-                  className="rounded-full border border-[var(--border)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-600"
-                >
-                  Limpiar
-                </button>
-              </div>
-            </div>
-            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-900">
-                    Participantes inscritos
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    {filteredParticipantRows.length} jugadores encontrados
-                  </p>
-                </div>
-              </div>
-              {filteredParticipantRows.length === 0 ? (
-                <p className="mt-4 text-sm text-slate-500">Sin inscritos.</p>
-              ) : (
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  {filteredParticipantRows.map((row) => (
-                    <div
-                      key={row.id}
-                      className="flex gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3 text-sm"
-                    >
-                      <div className="h-14 w-14 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-2)]">
-                        {row.player.photoUrl ? (
-                          <img
-                            src={row.player.photoUrl}
-                            alt={row.player.firstName}
-                            className="h-full w-full object-cover"
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center bg-[var(--surface-2)] text-slate-400">
-                            <svg
-                              aria-hidden="true"
-                              viewBox="0 0 64 64"
-                              className="h-10 w-10"
-                              fill="none"
-                            >
-                              <circle
-                                cx="32"
-                                cy="24"
-                                r="12"
-                                stroke="currentColor"
-                                strokeWidth="3"
-                              />
-                              <path
-                                d="M12 56c2-10 12-18 20-18s18 8 20 18"
-                                stroke="currentColor"
-                                strokeWidth="3"
-                                strokeLinecap="round"
-                              />
-                            </svg>
-                          </div>
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-semibold text-slate-900">
-                          <Link
-                            href={`/players/${row.player.id}`}
-                            className="text-cyan-600 underline-offset-2 hover:text-cyan-700 hover:underline"
-                          >
-                            {row.player.firstName} {row.player.lastName}
-                          </Link>
-                        </p>
-                        <p className="mt-1 text-xs text-cyan-600">
-                          {row.category.name} ({row.category.abbreviation})
-                        </p>
-                        {row.teamName && (
-                          <p className="mt-1 text-xs text-slate-500">
-                            Equipo: {row.teamName}
-                          </p>
-                        )}
-                        <p className="mt-1 text-xs text-slate-500">
-                          {row.location || "Sin ubicacion"}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
+        {tab === "participants" && (
+          <TournamentPublicParticipants
+            participantQuery={participantQuery}
+            setParticipantQuery={setParticipantQuery}
+            filteredParticipantRows={filteredParticipantRows}
+          />
         )}
 
         {tab === "groups" && (
@@ -1180,202 +1016,57 @@ export default function TournamentPublic({
                 {matchesError}
               </p>
             )}
-            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
-              <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_160px]">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
-                    Buscar jugador / equipo
-                  </label>
-                  <input
-                    value={fixtureQuery}
-                    onChange={(e) => setFixtureQuery(e.target.value)}
-                    placeholder="Nombre, equipo, grupo..."
-                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-200/40"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
-                    Categoria
-                  </label>
-                  <select
-                    value={fixtureCategory}
-                    onChange={(e) => setFixtureCategory(e.target.value)}
-                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-200/40"
-                  >
-                    <option value="all">Todas</option>
-                    {categoryOptions.map((category) => (
-                      <option key={category.id} value={category.id}>
-                        {category.name} ({category.abbreviation})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
-                    Hora
-                  </label>
-                  <input
-                    type="time"
-                    value={fixtureTime}
-                    onChange={(e) => setFixtureTime(e.target.value)}
-                    className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-200/40"
-                  />
-                </div>
-              </div>
-            </div>
-            {Array.from(fixtureMatchesByDate.entries()).map(([dateKey, matches]) => (
-              <div
-                key={`fixture-${dateKey}`}
-                className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6"
-              >
-                <h3 className="text-lg font-semibold text-slate-900">
-                  {dateKey === "sin-fecha"
-                    ? "Sin fecha asignada"
-                    : formatDateLong(dateKey)}
-                </h3>
-                <div className="mt-4 overflow-x-auto rounded-2xl border border-[var(--border)]">
-                  <table className="min-w-[900px] text-xs text-slate-600">
-                    <thead className="bg-[var(--surface-2)] uppercase tracking-[0.2em] text-slate-500">
-                      <tr>
-                        <th className="px-3 py-2 text-left">Hora</th>
-                        <th className="px-3 py-2 text-left">Club</th>
-                        <th className="px-3 py-2 text-left">Cancha</th>
-                        <th className="px-3 py-2 text-left">Categoria</th>
-                        <th className="px-3 py-2 text-left">Grupo</th>
-                        <th className="px-3 py-2 text-left">Equipo 1</th>
-                        <th className="px-3 py-2 text-left">VS</th>
-                        <th className="px-3 py-2 text-left">Equipo 2</th>
-                        <th className="px-3 py-2 text-left">Marcador</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/5">
-                      {matches.map((match) => {
-                        const category =
-                          match.category ?? categoriesById.get(match.categoryId);
-                        const score = formatMatchScore(match, getMatchCategory(match));
-                        const isLive = Boolean(match.liveState?.isLive);
-                        const drawType =
-                          categoryDrawTypeById.get(match.categoryId) ?? null;
-                        const isPlayoffWaiting =
-                          match.stage === "PLAYOFF" &&
-                          drawType === "GROUPS_PLAYOFF" &&
-                          !(groupStageCompleteByCategory.get(match.categoryId) ?? false);
-                        const teamAKey = `${match.id}-A`;
-                        const teamBKey = `${match.id}-B`;
-                        const teamAMembers = getTeamMembers(match.teamA);
-                        const teamBMembers = getTeamMembers(match.teamB);
-                        const canExpandTeamA =
-                          teamAMembers.length > 1 ||
-                          (teamAMembers.length > 0 && Boolean(match.teamA?.teamName));
-                        const canExpandTeamB =
-                          teamBMembers.length > 1 ||
-                          (teamBMembers.length > 0 && Boolean(match.teamB?.teamName));
-                        const isTeamAExpanded = expandedTeams.has(teamAKey);
-                        const isTeamBExpanded = expandedTeams.has(teamBKey);
-                        return (
-                          <tr key={match.id} className="bg-[var(--surface)]">
-                            <td className="px-3 py-2">
-                              {match.startTime ?? "N/D"}
-                            </td>
-                            <td className="px-3 py-2">
-                              {match.club?.name ?? "N/D"}
-                            </td>
-                            <td className="px-3 py-2">
-                              {match.courtNumber ?? "-"}
-                            </td>
-                            <td className="px-3 py-2">
-                              {category?.abbreviation ?? "N/D"}
-                            </td>
-                            <td className="px-3 py-2">
-                              {getPlayoffLabel(match)}
-                            </td>
-                            <td className="px-3 py-2 font-semibold text-slate-900">
-                              {isPlayoffWaiting ? (
-                                <span className="text-xs text-slate-400">
-                                  Por definir
-                                </span>
-                              ) : (
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <span>{teamLabel(match.teamA)}</span>
-                                    {canExpandTeamA && (
-                                      <button
-                                        type="button"
-                                        onClick={() => toggleTeamExpanded(teamAKey)}
-                                        className="text-[10px] font-semibold text-cyan-600"
-                                        aria-label={
-                                          isTeamAExpanded
-                                            ? "Ocultar jugadores"
-                                            : "Ver jugadores"
-                                        }
-                                      >
-                                        {isTeamAExpanded ? "v" : ">"}
-                                      </button>
-                                    )}
-                                  </div>
-                                  {canExpandTeamA && isTeamAExpanded && (
-                                    <div className="mt-1 text-[11px] text-slate-500">
-                                      {teamAMembers.join(" / ")}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 text-slate-400">vs</td>
-                            <td className="px-3 py-2 font-semibold text-slate-900">
-                              {isPlayoffWaiting ? (
-                                <span className="text-xs text-slate-400">
-                                  Por definir
-                                </span>
-                              ) : (
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <span>{teamLabel(match.teamB)}</span>
-                                    {canExpandTeamB && (
-                                      <button
-                                        type="button"
-                                        onClick={() => toggleTeamExpanded(teamBKey)}
-                                        className="text-[10px] font-semibold text-cyan-600"
-                                        aria-label={
-                                          isTeamBExpanded
-                                            ? "Ocultar jugadores"
-                                            : "Ver jugadores"
-                                        }
-                                      >
-                                        {isTeamBExpanded ? "v" : ">"}
-                                      </button>
-                                    )}
-                                  </div>
-                                  {canExpandTeamB && isTeamBExpanded && (
-                                    <div className="mt-1 text-[11px] text-slate-500">
-                                      {teamBMembers.join(" / ")}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 text-slate-500">
-                              <div className="flex items-center gap-2">
-                                {score ?? "-"}
-                                {isLive && (
-                                  <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-rose-200">
-                                    En vivo
-                                  </span>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ))}
-            {fixtureMatchesByDate.size === 0 && (
+            <TournamentPublicFixture
+              matches={safeMatches}
+              categoriesById={categoriesById}
+              categoryDrawTypeById={categoryDrawTypeById}
+              groupStageCompleteByCategory={groupStageCompleteByCategory}
+              bracketSizeByCategory={bracketSizeByCategory}
+              playoffRoundsByCategory={playoffRoundsByCategory}
+            />
+          </section>
+        )}
+
+        {tab === "bracket" && (
+          <section className="mt-8 space-y-6">
+            {playoffBrackets.length === 0 ? (
               <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-slate-500">
-                No se encontraron partidos con esos filtros.
+                No hay llaves publicadas.
               </div>
+            ) : (
+              playoffBrackets.map((entry) => (
+                <div
+                  key={`bracket-${entry.category.id}`}
+                  className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-lg font-semibold text-slate-900">
+                        {entry.category.name}
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        {entry.category.abbreviation}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-4">
+                    <BracketCanvas
+                      categoryId={entry.category.id}
+                      matches={entry.matches}
+                      bronzeMatches={entry.bronzeMatches}
+                      roundNumbers={entry.roundNumbers}
+                      bracketSize={entry.bracketSize}
+                      registrationMap={registrationMap}
+                      labelByRegistration={labelByRegistration}
+                      matchStatusByMatchId={entry.matchStatusByMatchId}
+                      className="relative max-h-[80vh] min-h-[480px] overflow-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3"
+                      theme={themeMode}
+                      disableSwap
+                      bracketState="published"
+                    />
+                  </div>
+                </div>
+              ))
             )}
           </section>
         )}
@@ -1503,22 +1194,6 @@ export default function TournamentPublic({
                         </div>
                       </div>
                     )}
-                  <div className="mt-4">
-                    <BracketCanvas
-                      categoryId={entry.category.id}
-                      matches={entry.matches}
-                      bronzeMatches={entry.bronzeMatches}
-                      roundNumbers={entry.roundNumbers}
-                      bracketSize={entry.bracketSize}
-                      registrationMap={registrationMap}
-                      labelByRegistration={labelByRegistration}
-                      matchStatusByMatchId={entry.matchStatusByMatchId}
-                      className="relative max-h-[80vh] min-h-[480px] overflow-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3"
-                      theme={themeMode}
-                      disableSwap
-                      bracketState="published"
-                    />
-                  </div>
                 </div>
               ))
             )}

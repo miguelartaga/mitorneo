@@ -156,10 +156,55 @@ export default function TournamentPublicFixture({
 }: TournamentPublicFixtureProps) {
     const [expandedTeams, setExpandedTeams] = useState<Set<string>>(new Set());
     const [fixtureDay, setFixtureDay] = useState<string | null>(null);
+    const [fixtureQuery, setFixtureQuery] = useState("");
+    const [fixtureCategory, setFixtureCategory] = useState("all");
+
+    const normalizeText = (value: string) =>
+        value
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .trim();
+
+    const categoryOptions = useMemo(() => {
+        const list = Array.from(categoriesById.values());
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        return list;
+    }, [categoriesById]);
+
+    const filteredMatches = useMemo(() => {
+        const categoryFilter = fixtureCategory !== "all" ? fixtureCategory : null;
+        const query = normalizeText(fixtureQuery);
+        const baseMatches = Array.isArray(matches) ? matches : [];
+
+        return baseMatches.filter((match) => {
+            if (categoryFilter && match.categoryId !== categoryFilter) return false;
+            if (!query) return true;
+            const category = match.category ?? categoriesById.get(match.categoryId);
+            const safePlayoffLabel = match.stage === "PLAYOFF"
+                ? match.isBronzeMatch
+                    ? "Bronce"
+                    : "Playoff"
+                : match.groupName ?? "";
+            const textParts = [
+                category?.name ?? "",
+                category?.abbreviation ?? "",
+                teamLabel(match.teamA),
+                getTeamMembers(match.teamA).join(" "),
+                teamLabel(match.teamB),
+                getTeamMembers(match.teamB).join(" "),
+                match.groupName ?? "",
+                safePlayoffLabel,
+                match.startTime ?? "",
+            ];
+            const haystack = normalizeText(textParts.join(" "));
+            return haystack.includes(query);
+        });
+    }, [matches, categoriesById, fixtureCategory, fixtureQuery]);
 
     const matchesByDate = useMemo(() => {
         const map = new Map<string, Match[]>();
-        matches.forEach((match) => {
+        filteredMatches.forEach((match) => {
             const dateKey = match.scheduledDate
                 ? match.scheduledDate.split("T")[0]
                 : "sin-fecha";
@@ -168,7 +213,7 @@ export default function TournamentPublicFixture({
             map.set(dateKey, list);
         });
         return map;
-    }, [matches]);
+    }, [filteredMatches]);
 
     useEffect(() => {
         if (matchesByDate.size > 0 && !fixtureDay) {
@@ -206,13 +251,48 @@ export default function TournamentPublicFixture({
     if (matchesByDate.size === 0) {
         return (
             <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-slate-500">
-                Aun no hay partidos programados.
+                {matches.length === 0 && !fixtureQuery && fixtureCategory === "all"
+                    ? "Aun no hay partidos programados."
+                    : "No se encontraron partidos con esos filtros."}
             </div>
         );
     }
 
     return (
         <div>
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
+                <div className="grid gap-3 md:grid-cols-[1.4fr_1fr]">
+                    <div className="space-y-1">
+                        <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                            Buscar jugador / equipo
+                        </label>
+                        <input
+                            value={fixtureQuery}
+                            onChange={(e) => setFixtureQuery(e.target.value)}
+                            placeholder="Nombre, equipo, grupo..."
+                            className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-200/40"
+                        />
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                            Categoria
+                        </label>
+                        <select
+                            value={fixtureCategory}
+                            onChange={(e) => setFixtureCategory(e.target.value)}
+                            className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-200/40"
+                        >
+                            <option value="all">Todas</option>
+                            {categoryOptions.map((category) => (
+                                <option key={category.id} value={category.id}>
+                                    {category.name} ({category.abbreviation})
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
             <div className="flex justify-center">
                 <div className="mb-6 flex w-full max-w-full gap-2 overflow-x-auto p-1.5 pb-4 hide-scrollbar">
                     {Array.from(matchesByDate.keys())
