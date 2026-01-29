@@ -1,7 +1,7 @@
 "use client";
 
 import { BracketCanvas } from "@/components/tournaments/bracket-canvas";
-import { buildSlotPositionMap } from "@/lib/playoff-match-utils";
+import { buildSlotPositionMap, computePlayoffMatchOrder } from "@/lib/playoff-match-utils";
 import { buildSeedOrder } from "@/lib/playoff-utils";
 import { useEffect, useMemo, useState } from "react";
 
@@ -98,6 +98,7 @@ type Props = {
   tournamentId: string;
   tournamentName: string;
   onStatusChange?: (status: "WAITING" | "ACTIVE" | "FINISHED") => void;
+  onUnlockStepNine?: () => void;
 };
 
 type StandingEntry = {
@@ -405,6 +406,7 @@ export default function TournamentPlayoffs({
   tournamentId,
   tournamentName,
   onStatusChange,
+  onUnlockStepNine,
 }: Props) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
@@ -433,6 +435,7 @@ export default function TournamentPlayoffs({
   );
   const [playoffSlots, setPlayoffSlots] = useState<PlayoffSlot[]>([]);
   const [lockingCategory, setLockingCategory] = useState<string | null>(null);
+  const [unlockingCategory, setUnlockingCategory] = useState<string | null>(null);
   const loadData = async () => {
     setLoading(true);
     setError(null);
@@ -627,6 +630,7 @@ export default function TournamentPlayoffs({
         matches: matchesForCategory.map((match) => ({
           id: match.id,
           roundNumber: match.roundNumber,
+          orderHint: match.orderHint ?? null,
           createdAt: match.createdAt,
           teamAId: match.teamAId,
           teamBId: match.teamBId,
@@ -678,31 +682,6 @@ export default function TournamentPlayoffs({
     qualifiersByGroup,
     registrationMap,
   ]);
-
-  const playoffRoundLabels = useMemo(() => {
-    const map = new Map<string, Map<number, string>>();
-    playoffMatchesByCategory.forEach((list, categoryId) => {
-      const roundCounts = new Map<number, number>();
-      list.forEach((match) => {
-        const round = match.roundNumber ?? 1;
-        roundCounts.set(round, (roundCounts.get(round) ?? 0) + 1);
-      });
-      const rounds = Array.from(roundCounts.keys()).sort((a, b) => a - b);
-      if (rounds.length === 0) return;
-      const firstRound = rounds[0];
-      const firstCount = roundCounts.get(firstRound) ?? 0;
-      const bracketSize = firstCount * 2;
-      const labelMap = new Map<number, string>();
-      rounds.forEach((round) => {
-        const roundSize = Math.round(
-          bracketSize / 2 ** (round - firstRound)
-        );
-        labelMap.set(round, formatPlayoffRoundLabel(roundSize, round));
-      });
-      map.set(categoryId, labelMap);
-    });
-    return map;
-  }, [playoffMatchesByCategory]);
 
   const handleGenerate = async (
     categoryId?: string,
@@ -795,6 +774,39 @@ export default function TournamentPlayoffs({
       setError(err instanceof Error ? err.message : "No se pudo bloquear la llave");
     } finally {
       setLockingCategory(null);
+    }
+  };
+
+  const handleUnlockCategory = async (categoryId: string) => {
+    if (unlockingCategory === categoryId) return;
+    setUnlockingCategory(categoryId);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch(
+        `/api/tournaments/${tournamentId}/fixtures/playoffs/unlock`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ categoryId }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = data?.detail ? ` (${data.detail})` : "";
+        throw new Error(
+          `${data?.error ?? "No se pudo desbloquear la llave"}${detail}`
+        );
+      }
+      await loadData();
+      setMessage("Llaves desbloqueadas");
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "No se pudo desbloquear la llave"
+      );
+    } finally {
+      setUnlockingCategory(null);
     }
   };
 
@@ -1002,6 +1014,23 @@ export default function TournamentPlayoffs({
           Se generan las llaves con el mejor contra el peor segun el ranking de
           grupos o el ranking del torneo cuando es eliminacion directa.
         </p>
+        {tournamentStatus === "ACTIVE" &&
+          (sessionRole === "ADMIN" || sessionRole === "TOURNAMENT_ADMIN") &&
+          allMatchesComplete &&
+          onUnlockStepNine && (
+          <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl border border-emerald-200/70 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-900">
+            <p className="text-sm font-semibold">
+              Felicidades culminaste el torneo. Si quieres terminar, presiona en habilitar paso 9 y veras la tabla de posiciones generales de todos.
+            </p>
+            <button
+              type="button"
+              onClick={onUnlockStepNine}
+              className="inline-flex items-center justify-center rounded-full bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-[0_16px_36px_-18px_rgba(5,150,105,0.55)] transition hover:bg-emerald-700"
+            >
+              Habilitar paso 9
+            </button>
+          </div>
+        )}
       </div>
 
       {playoffCategories.length === 0 ? (
@@ -1041,6 +1070,8 @@ export default function TournamentPlayoffs({
           });
           const roundNumbers = Array.from(roundMap.keys()).sort((a, b) => a - b);
           const firstRoundNumber = roundNumbers[0] ?? 1;
+          const lastRoundNumber =
+            roundNumbers.length > 0 ? roundNumbers[roundNumbers.length - 1] : 1;
           const bronzeRoundMap = new Map<number, Match[]>();
           bronzeMatches.forEach((match) => {
             const round = match.roundNumber ?? 1;
@@ -1060,7 +1091,6 @@ export default function TournamentPlayoffs({
             2,
             nextPowerOfTwo(bronzeMatches.length || 2)
           );
-          const labelMap = playoffRoundLabels.get(category.id);
           const qualifiedCount = qualifiedCountByCategory.get(category.id) ?? 0;
           const registrationsCount =
             registrationsByCategory.get(category.id)?.length ?? 0;
@@ -1078,28 +1108,51 @@ export default function TournamentPlayoffs({
               ? slotEntries.length
               : deriveBracketSizeFromMatches(mainMatches) ??
                 (qualifiedCount > 1 ? nextPowerOfTwo(qualifiedCount) : null);
+          const filledSlotCount = slotEntries.filter((slot) => slot.entrantId).length;
+          const displayBracketSize =
+            filledSlotCount > 1 ? nextPowerOfTwo(filledSlotCount) : null;
+          const labelBracketSize =
+            displayBracketSize ?? deriveBracketSizeFromMatches(mainMatches) ?? 0;
+          const expectedRounds =
+            labelBracketSize > 1
+              ? Math.max(1, Math.round(Math.log2(labelBracketSize)))
+              : roundNumbers.length || 1;
+          const normalizedRoundNumbers =
+            expectedRounds > 0
+              ? Array.from({ length: expectedRounds }, (_, index) => index + 1)
+              : roundNumbers.length > 0
+              ? roundNumbers
+              : [1];
+          const labelMap = new Map<number, string>();
+          if (labelBracketSize > 0 && normalizedRoundNumbers.length > 0) {
+            normalizedRoundNumbers.forEach((round, index) => {
+              const roundSize = Math.max(
+                2,
+                Math.floor(labelBracketSize / 2 ** Math.max(0, index))
+              );
+              labelMap.set(round, formatPlayoffRoundLabel(roundSize, round));
+            });
+          }
+          const slotEntriesForOrder = slotEntries.map((slot) => ({
+            position: slot.position,
+            entrantId: slot.entrantId ?? null,
+          }));
           const mainMatchesForBracket = mainMatches.map((match) => {
-            const round = match.roundNumber ?? firstRoundNumber;
-            if (round !== firstRoundNumber) {
+            if (slotEntriesForOrder.length === 0) {
               return match;
             }
-            const posA = slotPositionMap.get(`${match.id}:A`);
-            const posB = slotPositionMap.get(`${match.id}:B`);
-            const size = derivedBracketSize ?? 0;
-            const seedOrder = size > 0 ? buildSeedOrder(size) : [];
-            const orderMap = new Map<string, number>();
-            for (let i = 0; i < seedOrder.length; i += 2) {
-              const seedA = seedOrder[i];
-              const seedB = seedOrder[i + 1];
-              if (!seedA || !seedB) continue;
-              orderMap.set(`${seedA}|${seedB}`, i / 2);
-              orderMap.set(`${seedB}|${seedA}`, i / 2);
+            const orderHint = computePlayoffMatchOrder({
+              match: {
+                teamAId: match.teamAId ?? null,
+                teamBId: match.teamBId ?? null,
+                roundNumber: match.roundNumber ?? firstRoundNumber,
+              },
+              slots: slotEntriesForOrder,
+            });
+            if (typeof orderHint === "number") {
+              return { ...match, orderHint };
             }
-            const orderHint =
-              typeof posA === "number" && typeof posB === "number"
-                ? orderMap.get(`${posA}|${posB}`)
-                : undefined;
-            return { ...match, orderHint };
+            return match;
           });
           const seedOrderForSlots =
             derivedBracketSize && derivedBracketSize > 0
@@ -1238,6 +1291,16 @@ export default function TournamentPlayoffs({
                       {lockingCategory === category.id ? "Bloqueando..." : "Bloquear llaves"}
                     </button>
                   )}
+                  {bracketState === "LOCKED" && (
+                    <button
+                      type="button"
+                      onClick={() => handleUnlockCategory(category.id)}
+                      disabled={unlockingCategory === category.id}
+                      className="rounded-full border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 shadow-sm transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {unlockingCategory === category.id ? "Desbloqueando..." : "Desbloquear llaves"}
+                    </button>
+                  )}
                   <span className="rounded-full bg-indigo-50 px-3 py-1 text-[11px] font-semibold text-indigo-700">
                     Selecciona en la llave
                   </span>
@@ -1285,9 +1348,9 @@ export default function TournamentPlayoffs({
                   categoryId={category.id}
                   matches={mainMatchesForBracket}
                   bronzeMatches={bronzeMatches}
-                  roundNumbers={roundNumbers}
+                  roundNumbers={normalizedRoundNumbers}
                   roundLabelMap={labelMap}
-                  bracketSize={derivedBracketSize ?? undefined}
+                  bracketSize={labelBracketSize || derivedBracketSize || undefined}
                   registrationMap={registrationMap}
                   labelByRegistration={labelForBracket}
                   swapMode="select"

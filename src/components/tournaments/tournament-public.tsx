@@ -9,8 +9,8 @@ import {
   type TournamentRankingData,
   type StandingEntry,
 } from "@/lib/ranking";
-import { buildSlotPositionMap } from "@/lib/playoff-match-utils";
-import { buildSeedOrder } from "@/lib/playoff-utils";
+import { buildSlotPositionMap, computePlayoffMatchOrder } from "@/lib/playoff-match-utils";
+import { nextPowerOfTwo } from "@/lib/playoff-utils";
 
 import {
   type TournamentPublicData,
@@ -598,6 +598,7 @@ export default function TournamentPublic({
         matches: matchesForCategory.map((match) => ({
           id: match.id,
           roundNumber: match.roundNumber ?? null,
+          orderHint: match.orderHint ?? null,
           createdAt: match.createdAt ?? null,
           teamAId: match.teamAId ?? null,
           teamBId: match.teamBId ?? null,
@@ -607,37 +608,6 @@ export default function TournamentPublic({
     });
     return map;
   }, [slotMapByCategory, safeMatches]);
-
-  const playoffRoundLabels = useMemo(() => {
-    const map = new Map<string, Map<number, string>>();
-    const matchesByCategory = new Map<string, Match[]>();
-    safeMatches
-      .filter((match) => match.stage === "PLAYOFF")
-      .forEach((match) => {
-        const list = matchesByCategory.get(match.categoryId) ?? [];
-        list.push(match);
-        matchesByCategory.set(match.categoryId, list);
-      });
-    matchesByCategory.forEach((list, categoryId) => {
-      const roundCounts = new Map<number, number>();
-      list.forEach((match) => {
-        const round = match.roundNumber ?? 1;
-        roundCounts.set(round, (roundCounts.get(round) ?? 0) + 1);
-      });
-      const rounds = Array.from(roundCounts.keys()).sort((a, b) => a - b);
-      if (rounds.length === 0) return;
-      const firstRound = rounds[0];
-      const firstCount = roundCounts.get(firstRound) ?? 0;
-      const bracketSize = firstCount * 2;
-      const labelMap = new Map<number, string>();
-      rounds.forEach((round) => {
-        const roundSize = Math.round(bracketSize / 2 ** (round - firstRound));
-        labelMap.set(round, formatPlayoffRoundLabel(roundSize, round));
-      });
-      map.set(categoryId, labelMap);
-    });
-    return map;
-  }, [safeMatches]);
 
   const playoffBrackets = useMemo(() => {
     const map = new Map<
@@ -695,46 +665,42 @@ export default function TournamentPublic({
         )
       ).sort((a, b) => a - b);
       const firstRoundNumber = roundNumbers[0] ?? 1;
+      const lastRoundNumber =
+        roundNumbers.length > 0 ? roundNumbers[roundNumbers.length - 1] : 1;
       const derivedBracketSize =
         slotEntries.length > 0
           ? slotEntries.length
           : deriveBracketSizeFromMatches(entry.matches);
-      const seedOrder =
-        derivedBracketSize && derivedBracketSize > 0
-          ? buildSeedOrder(derivedBracketSize)
-          : [];
-      const orderMap = new Map<string, number>();
-      for (let i = 0; i < seedOrder.length; i += 2) {
-        const seedA = seedOrder[i];
-        const seedB = seedOrder[i + 1];
-        if (!seedA || !seedB) continue;
-        orderMap.set(`${seedA}|${seedB}`, i / 2);
-        orderMap.set(`${seedB}|${seedA}`, i / 2);
-      }
+      const filledSlotCount = slotEntries.filter((slot) => slot.entrantId).length;
+      const displayBracketSize =
+        filledSlotCount > 1 ? nextPowerOfTwo(filledSlotCount) : null;
+      const labelBracketSize =
+        displayBracketSize ?? deriveBracketSizeFromMatches(entry.matches) ?? 0;
       const expectedRounds =
-        derivedBracketSize && derivedBracketSize > 1
-          ? Math.max(1, Math.round(Math.log2(derivedBracketSize)))
-          : roundNumbers.length;
-      const missingRounds = Math.max(0, expectedRounds - roundNumbers.length);
+        labelBracketSize > 1
+          ? Math.max(1, Math.round(Math.log2(labelBracketSize)))
+          : roundNumbers.length || 1;
       const normalizedRoundNumbers =
-        missingRounds > 0
-          ? [
-            ...Array.from({ length: missingRounds }, (_, index) =>
-              Math.max(1, firstRoundNumber - missingRounds + index)
-            ),
-            ...roundNumbers,
-          ]
-          : roundNumbers;
+        expectedRounds > 0
+          ? Array.from({ length: expectedRounds }, (_, index) => index + 1)
+          : roundNumbers.length > 0
+          ? roundNumbers
+          : [1];
 
+      const slotEntriesForOrder = slotEntries.map((slot) => ({
+        position: slot.position,
+        entrantId: slot.entrantId ?? null,
+      }));
       const matchesForBracket = entry.matches.map((match) => {
-        const round = match.roundNumber ?? firstRoundNumber;
-        if (round !== firstRoundNumber) return match;
-        const posA = slotPositionMap.get(`${match.id}:A`);
-        const posB = slotPositionMap.get(`${match.id}:B`);
-        const orderHint =
-          typeof posA === "number" && typeof posB === "number"
-            ? orderMap.get(`${posA}|${posB}`)
-            : undefined;
+        if (slotEntriesForOrder.length === 0) return match;
+        const orderHint = computePlayoffMatchOrder({
+          match: {
+            teamAId: match.teamAId ?? null,
+            teamBId: match.teamBId ?? null,
+            roundNumber: match.roundNumber ?? firstRoundNumber,
+          },
+          slots: slotEntriesForOrder,
+        });
         if (typeof orderHint === "number") {
           return { ...match, orderHint };
         }
@@ -747,18 +713,24 @@ export default function TournamentPublic({
           matchStatusByMatchId.set(match.id, score);
         }
       });
-      const labelMap = playoffRoundLabels.get(entry.category.id);
+      const labelMap = new Map<number, string>();
+      if (labelBracketSize > 0 && normalizedRoundNumbers.length > 0) {
+        normalizedRoundNumbers.forEach((round, index) => {
+          const roundSize = Math.max(
+            2,
+            Math.floor(labelBracketSize / 2 ** Math.max(0, index))
+          );
+          labelMap.set(round, formatPlayoffRoundLabel(roundSize, round));
+        });
+      }
       const useLabelMap =
-        labelMap &&
-        normalizedRoundNumbers.every((round) => labelMap.has(round))
-          ? labelMap
-          : undefined;
+        labelMap.size > 0 ? labelMap : undefined;
       return {
         category: entry.category,
         matches: matchesForBracket,
         bronzeMatches: entry.bronzeMatches,
         roundNumbers: normalizedRoundNumbers,
-        bracketSize: derivedBracketSize,
+        bracketSize: labelBracketSize || derivedBracketSize,
         matchStatusByMatchId,
         roundLabelMap: useLabelMap,
       };
@@ -770,7 +742,6 @@ export default function TournamentPublic({
     categoryDrawTypeById,
     slotMapByCategory,
     slotPositionMapByCategory,
-    playoffRoundLabels,
   ]);
 
   const bracketSizeByCategory = useMemo(() => {

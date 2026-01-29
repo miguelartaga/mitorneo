@@ -608,17 +608,17 @@ export default function TournamentScores({
           (sessionRole === "ADMIN" || sessionRole === "TOURNAMENT_ADMIN") &&
           allMatchesComplete &&
           onUnlockStepNine && (
-          <div className="mt-4 flex flex-wrap items-center gap-2">
+          <div className="mt-5 flex flex-wrap items-center gap-3 rounded-2xl border border-emerald-200/70 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-900">
+            <p className="text-sm font-semibold">
+              Felicidades culminaste el torneo. Si quieres terminar, presiona en habilitar paso 9 y veras la tabla de posiciones generales de todos.
+            </p>
             <button
               type="button"
               onClick={onUnlockStepNine}
-              className="rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+              className="inline-flex items-center justify-center rounded-full bg-emerald-600 px-6 py-3 text-sm font-semibold text-white shadow-[0_16px_36px_-18px_rgba(5,150,105,0.55)] transition hover:bg-emerald-700"
             >
               Habilitar paso 9
             </button>
-            <span className="text-xs text-slate-500">
-              Disponible cuando todos los partidos estan completados.
-            </span>
           </div>
         )}
       </div>

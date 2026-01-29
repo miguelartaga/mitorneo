@@ -169,7 +169,7 @@ const compareStandings = (
 
 const getPointsForPlace = (entries: RankingPoint[], place: number) => {
   for (const entry of entries) {
-    const to = entry.placeTo ?? entry.placeFrom;
+    const to = entry.placeTo ?? Number.POSITIVE_INFINITY;
     if (place >= entry.placeFrom && place <= to) return entry.points;
   }
   return 0;

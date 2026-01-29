@@ -2275,6 +2275,10 @@ export default function TournamentsManager({
               }
               refreshTournaments();
             }}
+            onUnlockStepNine={() => {
+              setStepNineUnlocked(true);
+              setCurrentStep(9);
+            }}
           />
         ) : (
           <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">

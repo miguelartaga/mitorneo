@@ -68,12 +68,27 @@ export async function PATCH(
   }
 
   try {
-    const updated = await prisma.tournamentCategory.update({
-      where: {
-        tournamentId_categoryId: { tournamentId, categoryId },
-      },
-      data: { hasBronzeMatch: parsed },
-      select: { categoryId: true, hasBronzeMatch: true },
+    const updated = await prisma.$transaction(async (tx) => {
+      const category = await tx.tournamentCategory.update({
+        where: {
+          tournamentId_categoryId: { tournamentId, categoryId },
+        },
+        data: { hasBronzeMatch: parsed },
+        select: { categoryId: true, hasBronzeMatch: true },
+      });
+
+      if (!parsed) {
+        await tx.tournamentMatch.deleteMany({
+          where: {
+            tournamentId,
+            categoryId,
+            stage: "PLAYOFF",
+            isBronzeMatch: true,
+          },
+        });
+      }
+
+      return category;
     });
     return NextResponse.json({ category: updated });
   } catch {

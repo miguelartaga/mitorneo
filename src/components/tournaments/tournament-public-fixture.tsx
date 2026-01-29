@@ -483,7 +483,8 @@ export default function TournamentPublicFixture({
                                                 !(
                                                     groupStageCompleteByCategory.get(match.categoryId) ??
                                                     false
-                                                );
+                                                ) &&
+                                                !(match.teamAId && match.teamBId);
                                             const teamAKey = `${match.id}-A`;
                                             const teamBKey = `${match.id}-B`;
                                             const teamAMembers = getTeamMembers(match.teamA);

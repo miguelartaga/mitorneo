@@ -167,6 +167,15 @@ const isMatchMarked = (match: Match) => {
   return hasGames || hasOutcome;
 };
 
+const isMatchComplete = (match: Match) => {
+  const outcomeType = match.outcomeType ?? "PLAYED";
+  if (outcomeType !== "PLAYED") {
+    return Boolean(match.outcomeSide || match.winnerSide);
+  }
+  if (match.winnerSide) return true;
+  return Array.isArray(match.games) && match.games.length > 0;
+};
+
 const DEFAULT_TIEBREAKERS: Tiebreaker[] = [
   "SETS_DIFF",
   "MATCHES_WON",
@@ -899,8 +908,7 @@ const renderTeamDisplay = (
 
     groupMatchesByCategory.forEach((list, categoryId) => {
       const allComplete =
-        list.length > 0 &&
-        list.every((match) => computeMatchResult(parseGames(match.games)));
+        list.length > 0 && list.every((match) => isMatchComplete(match));
       map.set(categoryId, allComplete);
     });
 

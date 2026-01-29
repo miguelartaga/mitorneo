@@ -232,7 +232,7 @@ const compareStandings = (
 
 const getPointsForPlace = (entries: RankingPoint[], place: number) => {
   for (const entry of entries) {
-    const to = entry.placeTo ?? entry.placeFrom;
+    const to = entry.placeTo ?? Number.POSITIVE_INFINITY;
     if (place >= entry.placeFrom && place <= to) return entry.points;
   }
   return 0;
@@ -255,6 +255,7 @@ export default function TournamentFinalStandings({
   const [rankingPoints, setRankingPoints] = useState<RankingPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const [tournamentStatus, setTournamentStatus] = useState<
     "WAITING" | "ACTIVE" | "FINISHED"
@@ -644,6 +645,40 @@ export default function TournamentFinalStandings({
     return <p className="text-sm text-slate-500">Cargando posiciones finales...</p>;
   }
 
+  const handleDownloadPdf = async () => {
+    if (downloadingPdf) return;
+    setDownloadingPdf(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/tournaments/${tournamentId}/final-standings/pdf`,
+        { cache: "no-store" }
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const detail = data?.detail ? ` (${data.detail})` : "";
+        throw new Error(
+          `${data?.error ?? "No se pudo descargar el PDF"}${detail}`
+        );
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `ranking-${tournamentName || "torneo"}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "No se pudo descargar el PDF"
+      );
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
   return (
     <div className="space-y-8">
       <div className="admin-fade-up relative overflow-hidden rounded-[24px] border border-white/70 bg-white/80 p-6 shadow-[0_20px_60px_-45px_rgba(15,23,42,0.35)] ring-1 ring-slate-200/70 backdrop-blur">
@@ -660,17 +695,27 @@ export default function TournamentFinalStandings({
               Torneo: <span className="font-semibold">{tournamentName}</span>
             </p>
           </div>
-          {tournamentStatus === "ACTIVE" &&
-            (sessionRole === "ADMIN" || sessionRole === "TOURNAMENT_ADMIN") && (
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={handleFinishTournament}
-              disabled={finishing}
-              className="rounded-full bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+              onClick={handleDownloadPdf}
+              disabled={downloadingPdf}
+              className="inline-flex items-center justify-center rounded-full border border-indigo-200 bg-white px-4 py-2 text-xs font-semibold text-indigo-700 shadow-sm transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {finishing ? "Finalizando..." : "Terminar torneo"}
+              {downloadingPdf ? "Descargando..." : "Descargar PDF"}
             </button>
-          )}
+            {tournamentStatus === "ACTIVE" &&
+              (sessionRole === "ADMIN" || sessionRole === "TOURNAMENT_ADMIN") && (
+              <button
+                type="button"
+                onClick={handleFinishTournament}
+                disabled={finishing}
+                className="rounded-full bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+              >
+                {finishing ? "Finalizando..." : "Terminar torneo"}
+              </button>
+            )}
+          </div>
         </div>
         {!allMatchesComplete && tournamentStatus === "ACTIVE" && (
           <p className="mt-3 text-xs text-amber-600">

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
+import { computePlayoffMatchOrder } from "@/lib/playoff-match-utils";
 
 type GameInput = {
   a?: unknown;
@@ -59,11 +60,17 @@ const computeMatchWinner = (games: { a: number; b: number }[]) => {
 const determineWinnerTeamId = (match: {
   winnerSide?: "A" | "B" | null;
   games?: unknown;
+  outcomeType?: "PLAYED" | "WALKOVER" | "INJURY" | null;
+  outcomeSide?: "A" | "B" | null;
   teamAId?: string | null;
   teamBId?: string | null;
 }) => {
   if (match.winnerSide === "A") return match.teamAId ?? null;
   if (match.winnerSide === "B") return match.teamBId ?? null;
+  if (match.outcomeType && match.outcomeType !== "PLAYED") {
+    if (match.outcomeSide === "A") return match.teamBId ?? null;
+    if (match.outcomeSide === "B") return match.teamAId ?? null;
+  }
   const inferred = computeMatchWinner(parseGames(match.games));
   if (inferred === "A") return match.teamAId ?? null;
   if (inferred === "B") return match.teamBId ?? null;
@@ -80,6 +87,11 @@ type PlayoffMatchSlot = {
   roundNumber: number | null;
   teamAId: string | null;
   teamBId: string | null;
+  orderHint?: number | null;
+  winnerSide?: "A" | "B" | null;
+  outcomeType?: "PLAYED" | "WALKOVER" | "INJURY" | null;
+  outcomeSide?: "A" | "B" | null;
+  games?: unknown;
   createdAt: Date;
 };
 
@@ -88,6 +100,13 @@ const buildPlayoffStructure = (matches: PlayoffMatchSlot[]) => {
     const roundA = a.roundNumber ?? 1;
     const roundB = b.roundNumber ?? 1;
     if (roundA !== roundB) return roundA - roundB;
+    const orderA = typeof a.orderHint === "number" ? a.orderHint : null;
+    const orderB = typeof b.orderHint === "number" ? b.orderHint : null;
+    if (orderA !== null || orderB !== null) {
+      if (orderA === null) return 1;
+      if (orderB === null) return -1;
+      if (orderA !== orderB) return orderA - orderB;
+    }
     return a.createdAt.getTime() - b.createdAt.getTime();
   });
   const matchesByRound = new Map<number, PlayoffMatchSlot[]>();
@@ -103,6 +122,37 @@ const buildPlayoffStructure = (matches: PlayoffMatchSlot[]) => {
   return { matchesByRound, orderMap };
 };
 
+const buildMatchOrderOverrides = ({
+  matches,
+  slots,
+}: {
+  matches: PlayoffMatchSlot[];
+  slots: { position: number; entrantId: string | null }[];
+}) => {
+  const overrides = new Map<string, number>();
+  if (matches.length === 0 || slots.length === 0) {
+    return overrides;
+  }
+  const slotEntries = slots.map((slot) => ({
+    position: slot.position,
+    entrantId: slot.entrantId ?? null,
+  }));
+  matches.forEach((match) => {
+    const order = computePlayoffMatchOrder({
+      match: {
+        teamAId: match.teamAId,
+        teamBId: match.teamBId,
+        roundNumber: match.roundNumber ?? 1,
+      },
+      slots: slotEntries,
+    });
+    if (typeof order === "number") {
+      overrides.set(match.id, order);
+    }
+  });
+  return overrides;
+};
+
 const propagateWinnerToNextMatch = async (args: {
   tournamentId: string;
   categoryId: string;
@@ -115,15 +165,35 @@ const propagateWinnerToNextMatch = async (args: {
     select: {
       id: true,
       roundNumber: true,
+      orderHint: true,
       teamAId: true,
       teamBId: true,
+      winnerSide: true,
+      outcomeType: true,
+      outcomeSide: true,
+      games: true,
       createdAt: true,
       isBronzeMatch: true,
     },
   });
+  const playoffSlots = await prisma.playoffSlot.findMany({
+    where: { tournamentId, categoryId },
+    select: { position: true, entrantId: true },
+    orderBy: { position: "asc" },
+  });
   const mainMatches = playoffMatches.filter((entry) => !entry.isBronzeMatch);
   if (mainMatches.length === 0) return;
-  const { matchesByRound, orderMap } = buildPlayoffStructure(mainMatches);
+  const orderOverrides = buildMatchOrderOverrides({
+    matches: mainMatches,
+    slots: playoffSlots,
+  });
+  const { matchesByRound, orderMap } = buildPlayoffStructure(
+    mainMatches.map((match) =>
+      orderOverrides.has(match.id)
+        ? { ...match, orderHint: orderOverrides.get(match.id) ?? match.orderHint }
+        : match
+    )
+  );
   const pos = orderMap.get(matchId);
   if (!pos) return;
   const nextRound = pos.round + 1;
@@ -135,7 +205,32 @@ const propagateWinnerToNextMatch = async (args: {
   const slot = pos.order % 2 === 0 ? "teamAId" : "teamBId";
   const currentValue =
     slot === "teamAId" ? targetMatch.teamAId : targetMatch.teamBId;
-  if (currentValue && !isPlaceholderValue(currentValue)) {
+  const currentMatch = mainMatches.find((entry) => entry.id === matchId);
+  const feederIds = new Set(
+    [currentMatch?.teamAId, currentMatch?.teamBId].filter(Boolean) as string[]
+  );
+  const targetHasResult =
+    Boolean(targetMatch.winnerSide) ||
+    (targetMatch.outcomeType && targetMatch.outcomeType !== "PLAYED") ||
+    (Array.isArray(targetMatch.games) && targetMatch.games.length > 0);
+  const currentRoundMatches = matchesByRound.get(pos.round) ?? [];
+  const feederA = currentRoundMatches[targetIndex * 2];
+  const feederB = currentRoundMatches[targetIndex * 2 + 1];
+  const feederTeamIds = new Set(
+    [feederA?.teamAId, feederA?.teamBId, feederB?.teamAId, feederB?.teamBId].filter(
+      Boolean
+    ) as string[]
+  );
+  const isStaleSlot =
+    currentValue !== null &&
+    currentValue !== undefined &&
+    !feederTeamIds.has(currentValue);
+  const canOverwrite =
+    !currentValue ||
+    isPlaceholderValue(currentValue) ||
+    feederIds.has(currentValue) ||
+    (!targetHasResult && isStaleSlot);
+  if (!canOverwrite) {
     return;
   }
   if (currentValue === winnerTeamId) {
@@ -157,6 +252,7 @@ const propagateLosersToBronzeMatch = async (args: {
     select: {
       id: true,
       roundNumber: true,
+      orderHint: true,
       teamAId: true,
       teamBId: true,
       createdAt: true,
@@ -175,6 +271,12 @@ const propagateLosersToBronzeMatch = async (args: {
   const mainMatches = playoffMatches.filter((entry) => !entry.isBronzeMatch);
   if (mainMatches.length === 0) return;
 
+  const playoffSlots = await prisma.playoffSlot.findMany({
+    where: { tournamentId, categoryId },
+    select: { position: true, entrantId: true },
+    orderBy: { position: "asc" },
+  });
+
   const finalRound = Math.max(
     ...mainMatches.map((entry) => entry.roundNumber ?? 1),
     1
@@ -182,7 +284,17 @@ const propagateLosersToBronzeMatch = async (args: {
   if (finalRound <= 1) return;
   const semifinalRound = finalRound - 1;
 
-  const { matchesByRound } = buildPlayoffStructure(mainMatches);
+  const orderOverrides = buildMatchOrderOverrides({
+    matches: mainMatches,
+    slots: playoffSlots,
+  });
+  const { matchesByRound } = buildPlayoffStructure(
+    mainMatches.map((match) =>
+      orderOverrides.has(match.id)
+        ? { ...match, orderHint: orderOverrides.get(match.id) ?? match.orderHint }
+        : match
+    )
+  );
   const semifinalMatches = matchesByRound.get(semifinalRound) ?? [];
   if (semifinalMatches.length === 0) return;
 

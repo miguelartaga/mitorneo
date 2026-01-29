@@ -847,6 +847,6 @@ export async function POST(
 
   return NextResponse.json({
     created: createEntries.length,
-    deleted: deleteCategoryIds.length,
+    deleted: deleteMatchCategoryIds.length,
   });
 }

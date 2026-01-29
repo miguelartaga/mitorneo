@@ -13,7 +13,9 @@
     "db:setup": "echo \"db:setup disabled in production\"",
     "db:seed": "echo \"db:seed disabled in production\"",
     "db:seed:test": "echo \"db:seed:test disabled in production\"",
-    "regen-playoff": "node scripts/regenerate-playoff.js"
+    "regen-playoff": "node scripts/regenerate-playoff.js",
+    "repair-playoff": "node scripts/repair-playoff-bracket.js",
+    "repair-playoff:from-round1": "node scripts/repair-playoff-from-round1.js"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4",

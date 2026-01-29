@@ -304,6 +304,16 @@ export default function TournamentDraws({ tournamentId, tournamentName }: Props)
     setError(null);
     setMessage(null);
 
+    if (!enable) {
+      const confirmed = window.confirm(
+        "Esto eliminara el partido por el 3er lugar existente. Continuar?"
+      );
+      if (!confirmed) {
+        setBronzeUpdatingId(null);
+        return;
+      }
+    }
+
     const res = await fetch(
       `/api/tournaments/${tournamentId}/categories/${categoryId}`,
       {

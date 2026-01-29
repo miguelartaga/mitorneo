@@ -179,8 +179,12 @@ const buildBracketData = ({
         hasOpponent: boolean
       ): BracketSide => {
         if (roundIndexValue > 0 && bracketState === "draft") {
-          if (teamId && !hasOpponent) {
-            return { contestantId: teamId };
+          if (teamId) {
+            return {
+              contestantId: teamId,
+              isWinner:
+                winnerSide === (sideIndex === 0 ? "A" : "B") ? true : undefined,
+            };
           }
           const pendingId = `pending-${categoryId}-${match.id}-${sideIndex}`;
           ensurePlaceholderContestant(pendingId, "Por definir");

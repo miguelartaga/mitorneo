@@ -287,7 +287,7 @@ export async function POST(
       { roundNumber: "asc" },
       { createdAt: "asc" },
     ],
-    select: { id: true, roundNumber: true, createdAt: true },
+    select: { id: true, roundNumber: true, orderHint: true, createdAt: true },
   });
   const slotPositionMap = buildSlotPositionMap({
     slots: slotEntries,
