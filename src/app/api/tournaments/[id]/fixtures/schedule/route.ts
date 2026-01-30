@@ -746,18 +746,6 @@ export async function POST(
     (match) => match.stage === "PLAYOFF"
   );
 
-  const hasPlayoffMatches = allPlayoffMatches.length > 0;
-  const groupDays = hasPlayoffMatches
-    ? availablePlayDays.length > 2
-      ? availablePlayDays.slice(0, -2)
-      : []
-    : availablePlayDays;
-  const playoffDays = hasPlayoffMatches
-    ? availablePlayDays.length > 2
-      ? availablePlayDays.slice(-2)
-      : availablePlayDays.slice(-2)
-    : [];
-
   const categoryOrderIndex = new Map<string, number>();
   categoryOrder.forEach((category, index) => {
     categoryOrderIndex.set(category.categoryId, index);
@@ -779,14 +767,22 @@ export async function POST(
   });
 
   const roundNumbers = Array.from(roundBuckets.keys()).sort((a, b) => a - b);
+  const groupDaysNeeded =
+    roundNumbers.length > 0 ? Math.ceil(roundNumbers.length / roundsPerDay) : 0;
+  const groupDays = availablePlayDays.slice(0, groupDaysNeeded);
+  const playoffDays = availablePlayDays.slice(groupDaysNeeded);
 
   const updates: {
     id: string;
-    scheduledDate: Date;
+    scheduledDate: Date | null;
     startTime: string | null;
     clubId: string | null;
     courtNumber: number | null;
   }[] = [];
+  const overflowByDay = new Map<
+    string,
+    { missingMatches: number; slotCount: number; courtCount: number }
+  >();
 
   const assignMatchesToDay = (day: string, dayMatches: MatchSlot[]) => {
     const schedule = scheduleMap.get(day);
@@ -799,11 +795,26 @@ export async function POST(
     }
     const slotCount = slots.length;
     const courtCount = courts.length;
-    const totalSlots = slotCount * courtCount;
 
     dayMatches.forEach((match, index) => {
-      const slotIndex = Math.floor(index / courtCount) % slotCount;
+      const slotIndex = Math.floor(index / courtCount);
       const courtIndex = index % courtCount;
+      if (slotIndex >= slotCount) {
+        const current = overflowByDay.get(day);
+        overflowByDay.set(day, {
+          missingMatches: (current?.missingMatches ?? 0) + 1,
+          slotCount,
+          courtCount,
+        });
+        updates.push({
+          id: match.id,
+          scheduledDate: null,
+          startTime: null,
+          clubId: null,
+          courtNumber: null,
+        });
+        return;
+      }
       const slot = slots[slotIndex];
       const court = courts[courtIndex];
       updates.push({
@@ -869,41 +880,50 @@ export async function POST(
   );
 
   const playoffDayMatches = new Map<string, MatchSlot[]>();
+  let unscheduledWithoutDay = 0;
   if (playoffRoundNumbers.length > 0 && playoffDays.length === 0) {
-    return NextResponse.json(
-      { error: "No hay dias disponibles para el playoff" },
-      { status: 400 }
-    );
+    unscheduledWithoutDay = allPlayoffMatches.length;
+    allPlayoffMatches.forEach((match) => {
+      updates.push({
+        id: match.id,
+        scheduledDate: null,
+        startTime: null,
+        clubId: null,
+        courtNumber: null,
+      });
+    });
   }
 
-  const playoffDayFallback = playoffDays[playoffDays.length - 1];
-  playoffRoundNumbers.forEach((roundNumber, index) => {
-    const dayOffset = Math.floor(index / roundsPerDay);
-    const day = playoffDays[dayOffset] ?? playoffDayFallback;
-    if (!day) {
-      return;
-    }
-    if (!playoffDayMatches.has(day)) {
-      playoffDayMatches.set(day, []);
-    }
-    const ordered = [...(playoffRoundBuckets.get(roundNumber) ?? [])].sort(
-      (a, b) => {
-        if (a.categoryId !== b.categoryId) {
-          return a.categoryId.localeCompare(b.categoryId);
-        }
-        const roundA = a.roundNumber ?? 1;
-        const roundB = b.roundNumber ?? 1;
-        if (roundA !== roundB) return roundA - roundB;
-        return a.id.localeCompare(b.id);
+  if (playoffDays.length > 0) {
+    const playoffDayFallback = playoffDays[playoffDays.length - 1];
+    playoffRoundNumbers.forEach((roundNumber, index) => {
+      const dayOffset = Math.floor(index / roundsPerDay);
+      const day = playoffDays[dayOffset] ?? playoffDayFallback;
+      if (!day) {
+        return;
       }
-    );
-    playoffDayMatches.get(day)?.push(...ordered);
-  });
+      if (!playoffDayMatches.has(day)) {
+        playoffDayMatches.set(day, []);
+      }
+      const ordered = [...(playoffRoundBuckets.get(roundNumber) ?? [])].sort(
+        (a, b) => {
+          if (a.categoryId !== b.categoryId) {
+            return a.categoryId.localeCompare(b.categoryId);
+          }
+          const roundA = a.roundNumber ?? 1;
+          const roundB = b.roundNumber ?? 1;
+          if (roundA !== roundB) return roundA - roundB;
+          return a.id.localeCompare(b.id);
+        }
+      );
+      playoffDayMatches.get(day)?.push(...ordered);
+    });
 
-  for (const [day, dayMatches] of playoffDayMatches.entries()) {
-    const result = assignMatchesToDay(day, dayMatches);
-    if (result.error) {
-      return NextResponse.json({ error: result.error }, { status: 400 });
+    for (const [day, dayMatches] of playoffDayMatches.entries()) {
+      const result = assignMatchesToDay(day, dayMatches);
+      if (result.error) {
+        return NextResponse.json({ error: result.error }, { status: 400 });
+      }
     }
   }
 
@@ -923,8 +943,19 @@ export async function POST(
     );
   }
 
+  const overflowEntries = Array.from(overflowByDay.entries());
+  const totalMissing =
+    overflowEntries.reduce((acc, [, entry]) => acc + entry.missingMatches, 0) +
+    unscheduledWithoutDay;
+  const warning =
+    totalMissing > 0
+      ? `No alcanzan los horarios configurados: ${totalMissing} partido(s) quedaron sin horario. Agrega mas horas o dias para completar el calendario.`
+      : null;
+
   return NextResponse.json({
     updated: updates.length,
     playoffCreated: playoffCreates.length,
+    warning,
+    unscheduledCount: totalMissing,
   });
 }

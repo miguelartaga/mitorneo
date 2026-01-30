@@ -1551,7 +1551,11 @@ const renderTeamDisplay = (
     }
 
     await loadData();
-    setMessage("Calendario generado");
+    if (typeof data?.warning === "string" && data.warning.trim().length > 0) {
+      setMessage(`Calendario generado. ${data.warning}`);
+    } else {
+      setMessage("Calendario generado");
+    }
   };
 
   const handleTogglePublish = async () => {
@@ -1790,25 +1794,25 @@ const renderTeamDisplay = (
                 </p>
               ) : (
                 <div className="overflow-x-auto rounded-2xl border border-slate-200/70 bg-white">
-                  <table className="min-w-[640px] divide-y divide-slate-200/70 text-xs">
+                  <table className="w-full min-w-[640px] table-fixed divide-y divide-slate-200/70 text-xs">
                     <thead className="bg-slate-50/80 text-[10px] uppercase tracking-[0.18em] text-slate-500">
                       <tr>
-                        <th className="px-3 py-3 text-left font-semibold">
+                        <th className="w-24 px-3 py-3 text-left font-semibold">
                           Categoria
                         </th>
-                        <th className="px-3 py-3 text-left font-semibold">
+                        <th className="w-24 px-3 py-3 text-left font-semibold">
                           Grupo
                         </th>
                         <th className="px-3 py-3 text-left font-semibold">
                           Equipo 1
                         </th>
-                        <th className="px-3 py-3 text-center font-semibold">
+                        <th className="w-12 px-3 py-3 text-center font-semibold">
                           VS
                         </th>
                         <th className="px-3 py-3 text-left font-semibold">
                           Equipo 2
                         </th>
-                        <th className="px-3 py-3 text-left font-semibold">
+                        <th className="w-28 px-3 py-3 text-left font-semibold">
                           Marcador
                         </th>
                       </tr>
@@ -1906,10 +1910,10 @@ const renderTeamDisplay = (
                         });
                         return (
                           <tr key={match.id} className="bg-white">
-                            <td className="px-3 py-2 text-slate-700">
+                            <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
                               {category?.abbreviation ?? "N/D"}
                             </td>
-                            <td className="px-3 py-2 text-slate-700">
+                            <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
                               {groupLabel}
                             </td>
                             <td className="px-3 py-2 font-semibold text-slate-900">
@@ -1933,7 +1937,7 @@ const renderTeamDisplay = (
                                 </div>
                               )}
                             </td>
-                            <td className="px-3 py-2 text-center text-slate-400">
+                            <td className="px-3 py-2 text-center text-slate-400 whitespace-nowrap">
                               vs
                             </td>
                             <td className="px-3 py-2 font-semibold text-slate-900">
@@ -2012,7 +2016,7 @@ const renderTeamDisplay = (
                     <div className="flex flex-wrap items-center justify-between gap-3 print-hidden">
                       <div>
                         <h3 className="text-lg font-semibold text-slate-900">
-                          Dia {day}
+                          {formatPrintDate(day)}
                         </h3>
                         <p className="text-sm text-slate-500">{summary}</p>
                       </div>
@@ -2026,34 +2030,34 @@ const renderTeamDisplay = (
                       </p>
                       ) : (
                         <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200/70 bg-white">
-                          <table className="print-table min-w-[640px] divide-y divide-slate-200/70 text-xs">
+                          <table className="print-table w-full min-w-[640px] table-fixed divide-y divide-slate-200/70 text-xs">
                           <thead className="bg-slate-50/80 text-[10px] uppercase tracking-[0.18em] text-slate-500">
                             <tr>
-                              <th className="px-3 py-3 text-left font-semibold">
+                              <th className="w-20 px-3 py-3 text-left font-semibold">
                                 Hora
                               </th>
-                              <th className="px-3 py-3 text-left font-semibold">
+                              <th className="w-36 px-3 py-3 text-left font-semibold">
                                 Club
                               </th>
-                              <th className="px-3 py-3 text-left font-semibold">
+                              <th className="w-16 px-3 py-3 text-left font-semibold">
                                 Cancha
                               </th>
-                              <th className="px-3 py-3 text-left font-semibold">
+                              <th className="w-20 px-3 py-3 text-left font-semibold">
                                 Categoria
                               </th>
-                              <th className="px-3 py-3 text-left font-semibold">
+                              <th className="w-24 px-3 py-3 text-left font-semibold">
                                 Grupo
                               </th>
                               <th className="px-3 py-3 text-left font-semibold">
                                 Equipo 1
                               </th>
-                              <th className="px-3 py-3 text-center font-semibold">
+                              <th className="w-12 px-3 py-3 text-center font-semibold">
                                 VS
                               </th>
                               <th className="px-3 py-3 text-left font-semibold">
                                 Equipo 2
                               </th>
-                              <th className="px-3 py-3 text-left font-semibold print-hidden">
+                              <th className="w-28 px-3 py-3 text-left font-semibold print-hidden">
                                 Marcador
                               </th>
                             </tr>
@@ -2188,16 +2192,16 @@ const renderTeamDisplay = (
                                     isOver ? "bg-indigo-50" : "bg-white"
                                   } ${match ? "" : "print-hide-row"}`}
                                 >
-                                  <td className="px-3 py-2 text-slate-700">
+                                  <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
                                     {slot.time}
                                   </td>
                                   <td className="px-3 py-2 text-slate-700">
                                     {slot.clubName}
                                   </td>
-                                  <td className="px-3 py-2 text-slate-700">
+                                  <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
                                     {slot.courtNumber}
                                   </td>
-                                  <td className="px-3 py-2 text-slate-700">
+                                  <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
                                     {match ? (
                                       <span className="font-semibold text-slate-700">
                                         {category?.abbreviation ?? "N/D"}
@@ -2206,7 +2210,7 @@ const renderTeamDisplay = (
                                       <span className="text-slate-400">-</span>
                                     )}
                                   </td>
-                                  <td className="px-3 py-2 text-slate-700">
+                                  <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
                                     {match ? (
                                       <span className="font-semibold text-slate-700">
                                         {groupLabel}
@@ -2239,7 +2243,7 @@ const renderTeamDisplay = (
                                       </span>
                                     )}
                                   </td>
-                                  <td className="px-3 py-2 text-center text-slate-400">
+                                  <td className="px-3 py-2 text-center text-slate-400 whitespace-nowrap">
                                     {match ? "vs" : "-"}
                                   </td>
                                   <td className="px-3 py-2 font-semibold text-slate-900">
