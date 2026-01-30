@@ -79,6 +79,14 @@ const formatDateShort = (value?: string | null) => {
 };
 
 const formatMatchScore = (match: Match) => {
+    const outcomeType = match.outcomeType ?? "PLAYED";
+    if (outcomeType !== "PLAYED") {
+        return outcomeType === "WALKOVER"
+            ? "WO"
+            : outcomeType === "INJURY"
+                ? "Lesion"
+                : "Resultado";
+    }
     if (!Array.isArray(match.games)) return null;
     const parts: string[] = [];
     for (const entry of match.games) {
@@ -96,6 +104,41 @@ const formatMatchScore = (match: Match) => {
     }
     if (parts.length === 0) return null;
     return parts.join(" | ");
+};
+
+const parseGames = (value: unknown) => {
+    if (!Array.isArray(value)) return [] as { a: number; b: number }[];
+    const games: { a: number; b: number }[] = [];
+    for (const entry of value) {
+        if (!entry || typeof entry !== "object") continue;
+        const a = (entry as { a?: unknown }).a;
+        const b = (entry as { b?: unknown }).b;
+        if (typeof a !== "number" || typeof b !== "number") continue;
+        if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+        games.push({ a, b });
+    }
+    return games;
+};
+
+const computeMatchWinner = (match: Match) => {
+    if (match.winnerSide === "A" || match.winnerSide === "B") {
+        return match.winnerSide;
+    }
+    const outcomeType = match.outcomeType ?? "PLAYED";
+    if (outcomeType !== "PLAYED") {
+        if (match.outcomeSide === "A") return "B";
+        if (match.outcomeSide === "B") return "A";
+    }
+    const games = parseGames(match.games);
+    if (games.length === 0) return null;
+    let winsA = 0;
+    let winsB = 0;
+    games.forEach((game) => {
+        if (game.a > game.b) winsA += 1;
+        if (game.b > game.a) winsB += 1;
+    });
+    if (winsA === winsB) return null;
+    return winsA > winsB ? "A" : "B";
 };
 
 const playerLabel = (player?: Player | null) =>
@@ -205,9 +248,8 @@ export default function TournamentPublicFixture({
     const matchesByDate = useMemo(() => {
         const map = new Map<string, Match[]>();
         filteredMatches.forEach((match) => {
-            const dateKey = match.scheduledDate
-                ? match.scheduledDate.split("T")[0]
-                : "sin-fecha";
+            if (!match.scheduledDate) return;
+            const dateKey = match.scheduledDate.split("T")[0];
             const list = map.get(dateKey) ?? [];
             list.push(match);
             map.set(dateKey, list);
@@ -357,6 +399,9 @@ export default function TournamentPublicFixture({
                                     const category = match.category ?? categoriesById.get(match.categoryId);
                                     const score = formatMatchScore(match);
                                     const isLive = Boolean(match.liveState?.isLive);
+                                    const winnerSide = computeMatchWinner(match);
+                                    const teamAIsWinner = winnerSide === "A";
+                                    const teamBIsWinner = winnerSide === "B";
                                     const teamAKey = `${match.id}-A`;
                                     const teamBKey = `${match.id}-B`;
                                     const teamAMembers = getTeamMembers(match.teamA);
@@ -386,7 +431,14 @@ export default function TournamentPublicFixture({
                                                 {/* Team A */}
                                                 <div className="text-right">
                                                     <div className="flex flex-col items-end">
-                                                        <span className="font-semibold text-slate-900 leading-tight">
+                                                        <span
+                                                            className={`font-semibold leading-tight ${teamAIsWinner
+                                                                ? "text-emerald-600"
+                                                                : teamBIsWinner
+                                                                    ? "text-slate-400"
+                                                                    : "text-slate-900"
+                                                                }`}
+                                                        >
                                                             {teamLabel(match.teamA)}
                                                         </span>
                                                         {canExpandTeamA && (
@@ -417,7 +469,14 @@ export default function TournamentPublicFixture({
                                                 {/* Team B */}
                                                 <div className="text-left">
                                                     <div className="flex flex-col items-start">
-                                                        <span className="font-semibold text-slate-900 leading-tight">
+                                                        <span
+                                                            className={`font-semibold leading-tight ${teamBIsWinner
+                                                                ? "text-emerald-600"
+                                                                : teamAIsWinner
+                                                                    ? "text-slate-400"
+                                                                    : "text-slate-900"
+                                                                }`}
+                                                        >
                                                             {teamLabel(match.teamB)}
                                                         </span>
                                                         {canExpandTeamB && (
@@ -475,6 +534,9 @@ export default function TournamentPublicFixture({
                                                 match.category ?? categoriesById.get(match.categoryId);
                                             const score = formatMatchScore(match);
                                             const isLive = Boolean(match.liveState?.isLive);
+                                            const winnerSide = computeMatchWinner(match);
+                                            const teamAIsWinner = winnerSide === "A";
+                                            const teamBIsWinner = winnerSide === "B";
                                             const drawType =
                                                 categoryDrawTypeById.get(match.categoryId) ?? null;
                                             const isPlayoffWaiting =
@@ -518,7 +580,17 @@ export default function TournamentPublicFixture({
                                                         ) : (
                                                             <div>
                                                                 <div className="flex items-center gap-2">
-                                                                    <span>{teamLabel(match.teamA)}</span>
+                                                                    <span
+                                                                        className={
+                                                                            teamAIsWinner
+                                                                                ? "text-emerald-600"
+                                                                                : teamBIsWinner
+                                                                                    ? "text-slate-400"
+                                                                                    : "text-slate-900"
+                                                                        }
+                                                                    >
+                                                                        {teamLabel(match.teamA)}
+                                                                    </span>
                                                                     {canExpandTeamA && (
                                                                         <button
                                                                             type="button"
@@ -551,7 +623,17 @@ export default function TournamentPublicFixture({
                                                         ) : (
                                                             <div>
                                                                 <div className="flex items-center gap-2">
-                                                                    <span>{teamLabel(match.teamB)}</span>
+                                                                    <span
+                                                                        className={
+                                                                            teamBIsWinner
+                                                                                ? "text-emerald-600"
+                                                                                : teamAIsWinner
+                                                                                    ? "text-slate-400"
+                                                                                    : "text-slate-900"
+                                                                        }
+                                                                    >
+                                                                        {teamLabel(match.teamB)}
+                                                                    </span>
                                                                     {canExpandTeamB && (
                                                                         <button
                                                                             type="button"

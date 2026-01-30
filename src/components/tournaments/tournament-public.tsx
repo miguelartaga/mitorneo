@@ -715,12 +715,8 @@ export default function TournamentPublic({
       });
       const labelMap = new Map<number, string>();
       if (labelBracketSize > 0 && normalizedRoundNumbers.length > 0) {
-        normalizedRoundNumbers.forEach((round, index) => {
-          const roundSize = Math.max(
-            2,
-            Math.floor(labelBracketSize / 2 ** Math.max(0, index))
-          );
-          labelMap.set(round, formatPlayoffRoundLabel(roundSize, round));
+        normalizedRoundNumbers.forEach((round) => {
+          labelMap.set(round, formatPlayoffRoundLabel(labelBracketSize, round));
         });
       }
       const useLabelMap =

@@ -345,6 +345,20 @@ const computeMatchResult = (games: { a: number; b: number }[]) => {
   } as const;
 };
 
+const getWinnerSide = (match?: Match | null) => {
+  if (!match) return null;
+  if (match.winnerSide === "A" || match.winnerSide === "B") {
+    return match.winnerSide;
+  }
+  const outcomeType = match.outcomeType ?? "PLAYED";
+  if (outcomeType !== "PLAYED") {
+    if (match.outcomeSide === "A") return "B";
+    if (match.outcomeSide === "B") return "A";
+  }
+  const result = computeMatchResult(parseGames(match.games));
+  return result?.winner ?? null;
+};
+
 const formatMatchScore = (
   match?: Match | null,
   options?: { isTennisLike?: boolean; pointScore?: { A?: string | null; B?: string | null } }
@@ -838,7 +852,8 @@ const renderTeamDisplay = (
   showNames: boolean,
   category?: Category | null,
   expandedTeams?: Set<string>,
-  onToggle?: (registrationId: string) => void
+  onToggle?: (registrationId: string) => void,
+  tone?: "winner" | "loser" | null
 ) => {
   const name = formatTeamName(registration);
   if (!showNames || name === "N/D") {
@@ -861,13 +876,19 @@ const renderTeamDisplay = (
     showTeamToggle && teamName ? teamName : formatTeamName(registration);
   const isExpanded =
     showTeamToggle && registration ? expandedTeams?.has(registration.id) : false;
+  const toneClass =
+    tone === "winner"
+      ? "text-emerald-600 font-semibold"
+      : tone === "loser"
+        ? "text-slate-400"
+        : "text-slate-900";
   return (
     <div className="flex flex-col leading-tight">
       {label && (
         <span className="text-[11px] font-semibold text-slate-500">{label}</span>
       )}
       <div className="flex items-center gap-2">
-        <span className="text-slate-900">{displayName}</span>
+        <span className={toneClass}>{displayName}</span>
         {showTeamToggle && registration && onToggle && (
           <button
             type="button"
@@ -1814,6 +1835,19 @@ const renderTeamDisplay = (
                             ? playoffLabelMap.get(match.teamBId)
                             : null
                           : null;
+                        const winnerSide = getWinnerSide(match);
+                        const teamATone =
+                          winnerSide === "A"
+                            ? "winner"
+                            : winnerSide === "B"
+                              ? "loser"
+                              : null;
+                        const teamBTone =
+                          winnerSide === "B"
+                            ? "winner"
+                            : winnerSide === "A"
+                              ? "loser"
+                              : null;
                         const groupLabel =
                           match.stage === "PLAYOFF"
                             ? match.isBronzeMatch
@@ -1834,7 +1868,8 @@ const renderTeamDisplay = (
                                   false),
                               category,
                               expandedTeams,
-                              toggleTeamDetails
+                              toggleTeamDetails,
+                              teamATone
                             )
                           : (
                               <span className="text-xs text-slate-400">
@@ -1852,7 +1887,8 @@ const renderTeamDisplay = (
                                   false),
                               category,
                               expandedTeams,
-                              toggleTeamDetails
+                              toggleTeamDetails,
+                              teamBTone
                             )
                           : (
                               <span className="text-xs text-slate-400">
@@ -2052,6 +2088,19 @@ const renderTeamDisplay = (
                                   ? playoffLabelMap.get(match.teamBId)
                                   : null
                                 : null;
+                              const winnerSide = getWinnerSide(match);
+                              const teamATone =
+                                winnerSide === "A"
+                                  ? "winner"
+                                  : winnerSide === "B"
+                                    ? "loser"
+                                    : null;
+                              const teamBTone =
+                                winnerSide === "B"
+                                  ? "winner"
+                                  : winnerSide === "A"
+                                    ? "loser"
+                                    : null;
                               const groupLabel =
                                 match?.stage === "PLAYOFF" && match
                                   ? match.isBronzeMatch
@@ -2077,7 +2126,8 @@ const renderTeamDisplay = (
                                             false)),
                                       category,
                                       expandedTeams,
-                                      toggleTeamDetails
+                                      toggleTeamDetails,
+                                      teamATone
                                     )
                                   : (
                                       <span className="text-xs text-slate-400">
@@ -2099,7 +2149,8 @@ const renderTeamDisplay = (
                                             false)),
                                       category,
                                       expandedTeams,
-                                      toggleTeamDetails
+                                      toggleTeamDetails,
+                                      teamBTone
                                     )
                                   : (
                                       <span className="text-xs text-slate-400">
