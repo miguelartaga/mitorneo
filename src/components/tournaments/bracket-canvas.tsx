@@ -55,11 +55,16 @@ type BracketBuildParams = {
   labelByRegistration: Map<string, string>;
   matchStatusByMatchId?: Map<string, string>;
   bracketState?: "draft" | "locked" | "published";
+  teamNameOnly?: boolean;
 };
 
-const formatTeamName = (registration?: BracketRegistration) => {
+const formatTeamName = (
+  registration?: BracketRegistration,
+  teamNameOnly?: boolean
+) => {
   if (!registration) return "N/D";
   const teamName = registration.teamName?.trim();
+  if (teamNameOnly && teamName) return teamName;
   const players = [
     registration.player,
     registration.partner,
@@ -96,6 +101,7 @@ const buildBracketData = ({
   labelByRegistration,
   matchStatusByMatchId,
   bracketState,
+  teamNameOnly,
 }: BracketBuildParams) => {
   const safeMatches = Array.isArray(matches) ? matches : [];
   const safeBronzeMatches = Array.isArray(bronzeMatches) ? bronzeMatches : [];
@@ -105,7 +111,7 @@ const buildBracketData = ({
     if (contestants[id]) return;
     const registration = registrationMap.get(id);
     const title =
-      formatTeamName(registration) ||
+      formatTeamName(registration, teamNameOnly) ||
       (registration ? "Equipo" : "Participante sin datos");
     contestants[id] = {
       players: [{ title }],
@@ -249,6 +255,11 @@ export type BracketCanvasProps = {
   matchStatusByMatchId?: Map<string, string>;
   className?: string;
   theme?: "light" | "dark";
+  allowVerticalScroll?: boolean;
+  watermarkUrl?: string;
+  watermarkUrlDark?: string;
+  watermarkText?: string;
+  teamNameOnly?: boolean;
   swapMode?: "drag" | "select";
   selectableRegistrationIds?: string[];
   onSwapSides?: (
@@ -306,6 +317,11 @@ export const BracketCanvas = ({
   matchStatusByMatchId,
   className,
   theme = "light",
+  allowVerticalScroll = true,
+  watermarkUrl,
+  watermarkUrlDark,
+  watermarkText = "mitorneo.com.bo",
+  teamNameOnly = false,
   swapMode = "drag",
   selectableRegistrationIds = [],
   onSwapSides,
@@ -319,14 +335,15 @@ export const BracketCanvas = ({
       buildBracketData({
         categoryId,
         bracketSize,
-    matches,
-    bronzeMatches,
-    roundNumbers,
-    roundLabelMap,
-    registrationMap,
-    labelByRegistration,
-    matchStatusByMatchId,
-    bracketState,
+        matches,
+        bronzeMatches,
+        roundNumbers,
+        roundLabelMap,
+        registrationMap,
+        labelByRegistration,
+        matchStatusByMatchId,
+        bracketState,
+        teamNameOnly,
       }),
     [
       categoryId,
@@ -338,6 +355,7 @@ export const BracketCanvas = ({
       labelByRegistration,
       matchStatusByMatchId,
       bracketState,
+      teamNameOnly,
     ]
   );
   const missingOrderHintByRound = useMemo(() => {
@@ -379,19 +397,43 @@ export const BracketCanvas = ({
       <style jsx global>{`
         .simple-bracket {
           position: relative;
-          overflow: auto;
+          overflow-x: auto;
+          overflow-y: hidden;
           min-height: 320px;
           padding: 8px;
           -webkit-overflow-scrolling: touch;
+        }
+        .simple-bracket.scroll-y {
+          overflow-y: auto;
         }
         .simple-bracket-grid {
           position: relative;
           min-height: 320px;
         }
-        .simple-bracket-lines {
+        .simple-bracket-watermark {
           position: absolute;
           inset: 0;
           z-index: 0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          pointer-events: none;
+          opacity: 0.08;
+          background-repeat: no-repeat;
+          background-position: center;
+          background-size: 520px auto;
+        }
+        .simple-bracket-watermark span {
+          font-size: 40px;
+          font-weight: 700;
+          letter-spacing: 0.35em;
+          text-transform: uppercase;
+          color: #1e293b;
+        }
+        .simple-bracket-lines {
+          position: absolute;
+          inset: 0;
+          z-index: 1;
           fill: none;
           stroke: rgba(99, 102, 241, 0.35);
           stroke-width: 2;
@@ -399,7 +441,7 @@ export const BracketCanvas = ({
         .simple-bracket-round-column {
           position: absolute;
           top: 0;
-          z-index: 1;
+          z-index: 2;
           display: flex;
           flex-direction: column;
           align-items: stretch;
@@ -427,15 +469,32 @@ export const BracketCanvas = ({
           gap: 6px;
         }
         .simple-bracket-side {
+          position: relative;
           border-radius: 10px;
           border: 1px solid #e5e7eb;
-          padding: 6px 8px;
+          padding: 6px 28px 6px 8px;
           display: flex;
           align-items: center;
           gap: 8px;
           font-size: 12px;
           color: #0f172a;
           background: #f8fafc;
+        }
+        .simple-bracket-side-label {
+          display: block;
+          padding-right: 72px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .simple-bracket-side.winner {
+          border-color: #6366f1;
+          background: #eef2ff;
+          color: #312e81;
+          box-shadow: 0 10px 20px -16px rgba(79, 70, 229, 0.6);
+        }
+        .simple-bracket-side.loser {
+          color: #94a3b8;
         }
         .simple-bracket-side select {
           width: 100%;
@@ -452,12 +511,98 @@ export const BracketCanvas = ({
           letter-spacing: 0.18em;
           color: #6366f1;
         }
+        .simple-bracket-winner {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          border-radius: 999px;
+          background: #eef2ff;
+          color: #4338ca;
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.18em;
+          padding: 2px 8px;
+          text-transform: uppercase;
+        }
+        .simple-bracket-runner {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          border-radius: 999px;
+          background: #f1f5f9;
+          color: #475569;
+          font-size: 10px;
+          font-weight: 700;
+          letter-spacing: 0.18em;
+          padding: 2px 8px;
+          text-transform: uppercase;
+        }
+        .bracket-theme-dark .simple-bracket-lines {
+          stroke: rgba(148, 163, 184, 0.35);
+        }
+        .bracket-theme-dark .simple-bracket-round-title {
+          color: #cbd5f5;
+        }
+        .bracket-theme-dark .simple-bracket-match {
+          border-color: rgba(148, 163, 184, 0.2);
+          background: rgba(15, 23, 42, 0.7);
+          box-shadow: 0 16px 32px -24px rgba(15, 23, 42, 0.8);
+        }
+        .bracket-theme-dark .simple-bracket-side {
+          border-color: rgba(148, 163, 184, 0.25);
+          background: rgba(30, 41, 59, 0.9);
+          color: #e2e8f0;
+        }
+        .bracket-theme-dark .simple-bracket-side.loser {
+          color: #64748b;
+        }
+        .bracket-theme-dark .simple-bracket-side.winner {
+          border-color: rgba(56, 189, 248, 0.6);
+          background: rgba(2, 132, 199, 0.15);
+          color: #e0f2fe;
+        }
+        .bracket-theme-dark .simple-bracket-meta {
+          color: #7dd3fc;
+        }
+        .bracket-theme-dark .simple-bracket-winner {
+          background: rgba(2, 132, 199, 0.2);
+          color: #bae6fd;
+        }
+        .bracket-theme-dark .simple-bracket-runner {
+          background: rgba(30, 41, 59, 0.8);
+          color: #cbd5e1;
+        }
+        .simple-bracket-side-badge {
+          position: absolute;
+          right: 6px;
+          bottom: 6px;
+          border-radius: 999px;
+          padding: 2px 6px;
+          font-size: 9px;
+          font-weight: 700;
+          letter-spacing: 0.18em;
+          text-transform: uppercase;
+          background: #eef2ff;
+          color: #4338ca;
+        }
+        .simple-bracket-side-badge.runner {
+          background: #f1f5f9;
+          color: #475569;
+        }
+        .bracket-theme-dark .simple-bracket-side-badge {
+          background: rgba(2, 132, 199, 0.2);
+          color: #bae6fd;
+        }
+        .bracket-theme-dark .simple-bracket-side-badge.runner {
+          background: rgba(30, 41, 59, 0.8);
+          color: #cbd5e1;
+        }
       `}</style>
       <div className={wrapperClassName}>
         {data.rounds.length === 0 ? (
           <div className="text-sm text-slate-500">Sin llaves</div>
         ) : (
-          <div className="simple-bracket">
+          <>
             {(() => {
               const isRealContestant = (id?: string) =>
                 Boolean(id) &&
@@ -587,6 +732,7 @@ export const BracketCanvas = ({
                         ? getSideId(match.sides[1])
                         : undefined,
                       rawSides: match.sides,
+                      matchStatus: match.matchStatus,
                     })),
                   }));
 
@@ -641,21 +787,36 @@ export const BracketCanvas = ({
                 const displayB = match.teamBId ?? undefined;
                 const hasTeamA = Boolean(displayA);
                 const hasTeamB = Boolean(displayB);
+                const winnerSide = match.winnerSide ?? null;
                 const top = firstCount * step + 32;
                 const columnLeft = (roundCount - 1) * (matchWidth + columnGap);
 
                 const renderSideStatic = (
                   teamId?: string | null,
-                  hasOpponent?: boolean
+                  hasOpponent?: boolean,
+                  sideKey?: "A" | "B"
                 ) => {
                   if (teamId) {
                     const registration = registrationMap.get(teamId);
-                    const label = formatTeamName(registration);
+                    const label = formatTeamName(registration, teamNameOnly);
                     const seedLabel = labelByRegistration.get(teamId);
+                    const isWinner =
+                      Boolean(winnerSide) && sideKey && winnerSide === sideKey;
+                    const sideClass = [
+                      "simple-bracket-side",
+                      isWinner ? "winner" : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" ");
                     return (
-                      <div className="simple-bracket-side">
-                        {seedLabel ? `${seedLabel} ` : ""}
-                        {label}
+                      <div className={sideClass}>
+                        <span className="simple-bracket-side-label">
+                          {seedLabel ? `${seedLabel} ` : ""}
+                          {label}
+                        </span>
+                        {isWinner && (
+                          <span className="simple-bracket-side-badge">3er lugar</span>
+                        )}
                       </div>
                     );
                   }
@@ -677,8 +838,8 @@ export const BracketCanvas = ({
                       style={{ top, height: matchHeight }}
                     >
                       <div className="simple-bracket-meta">3er lugar</div>
-                      {renderSideStatic(displayA, hasTeamB)}
-                      {renderSideStatic(displayB, hasTeamA)}
+                      {renderSideStatic(displayA, hasTeamB, "A")}
+                      {renderSideStatic(displayB, hasTeamA, "B")}
                     </div>
                   </div>
                 );
@@ -686,180 +847,230 @@ export const BracketCanvas = ({
 
               return (
                 <div
-                  className="simple-bracket-grid"
-                  style={{
-                    height: totalHeight,
-                    width: totalWidth,
-                  }}
+                  className={`simple-bracket${allowVerticalScroll ? " scroll-y" : ""}`}
+                  style={{ height: allowVerticalScroll ? undefined : totalHeight }}
                 >
-                  <svg
-                    className="simple-bracket-lines"
-                    width={totalWidth}
-                    height={totalHeight}
-                    viewBox={`0 0 ${totalWidth} ${totalHeight}`}
-                    preserveAspectRatio="none"
+                  <div
+                    className="simple-bracket-grid"
+                    style={{
+                      height: totalHeight,
+                      width: totalWidth,
+                    }}
                   >
-                    {lines.map((line) => (
-                      <path key={line.key} d={line.d} />
-                    ))}
-                  </svg>
-                  {renderRounds.map((round, roundIndex) => {
-                    const columnLeft = roundIndex * (matchWidth + columnGap);
-                    return (
+                    {((theme === "dark" ? watermarkUrlDark : watermarkUrl) || watermarkText) && (
                       <div
-                        key={`${round.roundIndex}-${round.name}`}
-                        className="simple-bracket-round-column"
-                        style={{ left: columnLeft, width: matchWidth }}
+                        className="simple-bracket-watermark"
+                        style={{
+                          backgroundImage: (theme === "dark" ? watermarkUrlDark : watermarkUrl)
+                            ? `url(${theme === "dark" ? watermarkUrlDark : watermarkUrl})`
+                            : undefined,
+                        }}
+                        aria-hidden="true"
                       >
-                        <div className="simple-bracket-round-title">
-                          {round.name}
-                        </div>
-                        {round.matches.map((match) => {
-                          const matchIndex = match.order ?? 0;
-                          const top = getCenterY(roundIndex, matchIndex) - matchHeight / 2;
-                          const displayA = match.displayA;
-                          const displayB = match.displayB;
-                          const hasTeamA = Boolean(displayA);
-                          const hasTeamB = Boolean(displayB);
-                          const canSelect =
-                            bracketState === "draft" &&
-                            swapMode === "select" &&
-                            Boolean(onSelectSwap) &&
-                            selectableRegistrationIds.length > 0 &&
-                            round.roundIndex === 0;
+                        {watermarkText ? <span>{watermarkText}</span> : null}
+                      </div>
+                    )}
+                    <svg
+                      className="simple-bracket-lines"
+                      width={totalWidth}
+                      height={totalHeight}
+                      viewBox={`0 0 ${totalWidth} ${totalHeight}`}
+                      preserveAspectRatio="none"
+                    >
+                      {lines.map((line) => (
+                        <path key={line.key} d={line.d} />
+                      ))}
+                    </svg>
+                    {renderRounds.map((round, roundIndex) => {
+                      const columnLeft = roundIndex * (matchWidth + columnGap);
+                      return (
+                        <div
+                          key={`${round.roundIndex}-${round.name}`}
+                          className="simple-bracket-round-column"
+                          style={{ left: columnLeft, width: matchWidth }}
+                        >
+                          <div className="simple-bracket-round-title">
+                            {round.name}
+                          </div>
+                          {round.matches.map((match) => {
+                            const matchIndex = match.order ?? 0;
+                            const top = getCenterY(roundIndex, matchIndex) - matchHeight / 2;
+                            const displayA = match.displayA;
+                            const displayB = match.displayB;
+                            const hasTeamA = Boolean(displayA);
+                            const hasTeamB = Boolean(displayB);
+                            const canSelect =
+                              bracketState === "draft" &&
+                              swapMode === "select" &&
+                              Boolean(onSelectSwap) &&
+                              selectableRegistrationIds.length > 0 &&
+                              round.roundIndex === 0;
+                            const isFinalRound = roundIndex === roundCount - 1;
+                            const sideAWon = Boolean(match.rawSides?.[0]?.isWinner);
+                            const sideBWon = Boolean(match.rawSides?.[1]?.isWinner);
 
-                          const renderSide = (
-                            side: BracketSide | undefined,
-                            sideKey: "A" | "B",
-                            hasOpponent: boolean,
-                            displayId?: string
-                          ) => {
-                            const contestantId = side?.contestantId;
-                            const isPlaceholder =
-                              contestantId?.startsWith("bye-") ||
-                              contestantId?.startsWith("empty-") ||
-                              contestantId?.startsWith("pending-");
-                            const currentId = isPlaceholder ? "" : contestantId ?? "";
+                            const renderSide = (
+                              side: BracketSide | undefined,
+                              sideKey: "A" | "B",
+                              hasOpponent: boolean,
+                              displayId?: string
+                            ) => {
+                              const contestantId = side?.contestantId;
+                              const isPlaceholder =
+                                contestantId?.startsWith("bye-") ||
+                                contestantId?.startsWith("empty-") ||
+                                contestantId?.startsWith("pending-");
+                              const currentId = isPlaceholder ? "" : contestantId ?? "";
 
-                            if (canSelect) {
-                              const effectiveId = displayId ?? currentId;
-                              const currentRegistration =
-                                effectiveId && registrationMap.has(effectiveId)
-                                  ? registrationMap.get(effectiveId)
+                              if (canSelect) {
+                                const effectiveId = displayId ?? currentId;
+                                const currentRegistration =
+                                  effectiveId && registrationMap.has(effectiveId)
+                                    ? registrationMap.get(effectiveId)
+                                    : undefined;
+                                const currentLabel = effectiveId
+                                  ? formatTeamName(currentRegistration, teamNameOnly)
+                                  : "";
+                                const currentSeedLabel = effectiveId
+                                  ? labelByRegistration.get(effectiveId)
                                   : undefined;
-                              const currentLabel = effectiveId
-                                ? formatTeamName(currentRegistration)
-                                : "";
-                              const currentSeedLabel = effectiveId
-                                ? labelByRegistration.get(effectiveId)
-                                : undefined;
-                              const currentExistsInOptions =
-                                effectiveId &&
-                                selectableRegistrationIds.includes(effectiveId);
-                              return (
-                                <div className="simple-bracket-side">
-                                  <select
-                                    disabled={Boolean(disableSwap)}
-                                    value={effectiveId || ""}
-                                    onChange={(event) => {
-                                      const value = event.target.value;
-                                      if (!value) return;
-                                      onSelectSwap?.(
-                                        match.matchId ?? "",
-                                        sideKey,
-                                        value
-                                      );
-                                    }}
-                                  >
-                                    <option value="" disabled>
-                                      Seleccionar
-                                    </option>
-                                    <option value="__BYE__">Bye</option>
-                                    {effectiveId && !currentExistsInOptions ? (
-                                      <option value={effectiveId}>
-                                        {currentSeedLabel
-                                          ? `${currentSeedLabel} - ${currentLabel}`
-                                          : currentLabel}
+                                const currentExistsInOptions =
+                                  effectiveId &&
+                                  selectableRegistrationIds.includes(effectiveId);
+                                return (
+                                  <div className="simple-bracket-side">
+                                    <select
+                                      disabled={Boolean(disableSwap)}
+                                      value={effectiveId || ""}
+                                      onChange={(event) => {
+                                        const value = event.target.value;
+                                        if (!value) return;
+                                        onSelectSwap?.(
+                                          match.matchId ?? "",
+                                          sideKey,
+                                          value
+                                        );
+                                      }}
+                                    >
+                                      <option value="" disabled>
+                                        Seleccionar
                                       </option>
-                                    ) : null}
-                                    {selectableRegistrationIds.map((id) => {
-                                      const registration = registrationMap.get(id);
-                                      const label = formatTeamName(registration);
-                                      const seedLabel = labelByRegistration.get(id);
-                                      const isOccupied =
-                                        occupiedRegistrationIds.has(id) &&
-                                        id !== currentId;
-                                      return (
-                                        <option key={id} value={id}>
-                                          {seedLabel
-                                            ? `${seedLabel} - ${label}`
-                                            : label}
-                                          {isOccupied ? " (ocupado)" : ""}
+                                      <option value="__BYE__">Bye</option>
+                                      {effectiveId && !currentExistsInOptions ? (
+                                        <option value={effectiveId}>
+                                          {currentSeedLabel
+                                            ? `${currentSeedLabel} - ${currentLabel}`
+                                            : currentLabel}
                                         </option>
-                                      );
-                                    })}
-                                  </select>
-                                </div>
-                              );
-                            }
+                                      ) : null}
+                                      {selectableRegistrationIds.map((id) => {
+                                        const registration = registrationMap.get(id);
+                                        const label = formatTeamName(registration, teamNameOnly);
+                                        const seedLabel = labelByRegistration.get(id);
+                                        const isOccupied =
+                                          occupiedRegistrationIds.has(id) &&
+                                          id !== currentId;
+                                        return (
+                                          <option key={id} value={id}>
+                                            {seedLabel
+                                              ? `${seedLabel} - ${label}`
+                                              : label}
+                                            {isOccupied ? " (ocupado)" : ""}
+                                          </option>
+                                        );
+                                      })}
+                                    </select>
+                                  </div>
+                                );
+                              }
 
-                            if (displayId) {
-                              const registration = registrationMap.get(displayId);
-                              const label = formatTeamName(registration);
-                              const seedLabel = labelByRegistration.get(displayId);
-                              return (
-                                <div className="simple-bracket-side">
-                                  {seedLabel ? `${seedLabel} ` : ""}
-                                  {label}
-                                </div>
-                              );
-                            }
+                              if (displayId) {
+                                const registration = registrationMap.get(displayId);
+                                const label = formatTeamName(registration, teamNameOnly);
+                                const seedLabel = labelByRegistration.get(displayId);
+                                const isWinner =
+                                  sideKey === "A" ? sideAWon : sideBWon;
+                                const isLoser =
+                                  (sideKey === "A" ? sideBWon : sideAWon) &&
+                                  !isWinner;
+                                const sideClass = [
+                                  "simple-bracket-side",
+                                  isWinner ? "winner" : null,
+                                  isLoser ? "loser" : null,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ");
+                                const badge =
+                                  isFinalRound && (sideKey === "A" ? sideAWon : sideBWon)
+                                    ? "Campeon"
+                                    : isFinalRound && (sideKey === "A" ? sideBWon : sideAWon)
+                                      ? "2do lugar"
+                                      : null;
+                                return (
+                                  <div className={sideClass}>
+                                    <span className="simple-bracket-side-label">
+                                      {seedLabel ? `${seedLabel} ` : ""}
+                                      {label}
+                                    </span>
+                                    {badge && (
+                                      <span
+                                        className={`simple-bracket-side-badge${
+                                          badge === "Campeon" ? "" : " runner"
+                                        }`}
+                                      >
+                                        {badge}
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              }
 
-                            if (round.roundIndex === 0) {
+                              if (round.roundIndex === 0) {
+                                return (
+                                  <div className="simple-bracket-side">
+                                    {hasOpponent ? "Bye" : "Disponible"}
+                                  </div>
+                                );
+                              }
+
                               return (
-                                <div className="simple-bracket-side">
-                                  {hasOpponent ? "Bye" : "Disponible"}
-                                </div>
+                                <div className="simple-bracket-side">Por definir</div>
                               );
-                            }
+                            };
 
                             return (
-                              <div className="simple-bracket-side">Por definir</div>
-                            );
-                          };
-
-                          return (
-                            <div
-                              key={match.matchId ?? match.order}
-                              className="simple-bracket-match"
-                              style={{ top, height: matchHeight }}
-                            >
-                              <div className="simple-bracket-meta">
-                                {round.name}
+                              <div
+                                key={match.matchId ?? match.order}
+                                className="simple-bracket-match"
+                                style={{ top, height: matchHeight }}
+                              >
+                                <div className="simple-bracket-meta">
+                                  {match.matchStatus ?? round.name}
+                                </div>
+                                {renderSide(
+                                  match.rawSides ? match.rawSides[0] : undefined,
+                                  "A",
+                                  hasTeamB,
+                                  displayA
+                                )}
+                                {renderSide(
+                                  match.rawSides ? match.rawSides[1] : undefined,
+                                  "B",
+                                  hasTeamA,
+                                  displayB
+                                )}
                               </div>
-                              {renderSide(
-                                match.rawSides ? match.rawSides[0] : undefined,
-                                "A",
-                                hasTeamB,
-                                displayA
-                              )}
-                              {renderSide(
-                                match.rawSides ? match.rawSides[1] : undefined,
-                                "B",
-                                hasTeamA,
-                                displayB
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    );
-                  })}
-                  {renderBronze()}
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                    {renderBronze()}
+                  </div>
                 </div>
               );
             })()}
-          </div>
+          </>
         )}
       </div>
     </>

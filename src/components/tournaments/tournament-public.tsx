@@ -165,6 +165,41 @@ const formatMatchScore = (match: Match, category?: Category | null) => {
   return parts.join(" | ");
 };
 
+const parseGames = (value: unknown) => {
+  if (!Array.isArray(value)) return [] as { a: number; b: number }[];
+  const games: { a: number; b: number }[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const a = (entry as { a?: unknown }).a;
+    const b = (entry as { b?: unknown }).b;
+    if (typeof a !== "number" || typeof b !== "number") continue;
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue;
+    games.push({ a, b });
+  }
+  return games;
+};
+
+const computeWinnerSide = (match: Match) => {
+  if (match.winnerSide === "A" || match.winnerSide === "B") {
+    return match.winnerSide;
+  }
+  const outcomeType = match.outcomeType ?? "PLAYED";
+  if (outcomeType !== "PLAYED") {
+    if (match.outcomeSide === "A") return "B";
+    if (match.outcomeSide === "B") return "A";
+  }
+  const games = parseGames(match.games);
+  if (games.length === 0) return null;
+  let winsA = 0;
+  let winsB = 0;
+  games.forEach((game) => {
+    if (game.a > game.b) winsA += 1;
+    if (game.b > game.a) winsB += 1;
+  });
+  if (winsA === winsB) return null;
+  return winsA > winsB ? "A" : "B";
+};
+
 const isMatchComplete = (match: Match) => {
   const outcomeType = match.outcomeType ?? "PLAYED";
   if (outcomeType !== "PLAYED") {
@@ -721,6 +756,8 @@ export default function TournamentPublic({
       }
       const useLabelMap =
         labelMap.size > 0 ? labelMap : undefined;
+      const teamNameOnly =
+        (entry.category.sport?.name ?? "").toLowerCase().includes("fronton");
       return {
         category: entry.category,
         matches: matchesForBracket,
@@ -729,6 +766,7 @@ export default function TournamentPublic({
         bracketSize: labelBracketSize || derivedBracketSize,
         matchStatusByMatchId,
         roundLabelMap: useLabelMap,
+        teamNameOnly,
       };
     });
   }, [
@@ -1153,10 +1191,14 @@ export default function TournamentPublic({
                       registrationMap={registrationMap}
                       labelByRegistration={labelByRegistration}
                       matchStatusByMatchId={entry.matchStatusByMatchId}
-                      className="relative max-h-[80vh] min-h-[480px] overflow-auto rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3"
+                      teamNameOnly={entry.teamNameOnly}
+                      className="relative min-h-[480px] overflow-x-auto overflow-y-visible rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-3"
                       theme={themeMode}
+                      allowVerticalScroll={false}
+                      watermarkUrl="/logo/logo1.png"
                       disableSwap
                       bracketState="published"
+                      watermarkUrlDark="/logo/logo%20dark.png"
                     />
                   </div>
                 </div>
@@ -1318,6 +1360,19 @@ export default function TournamentPublic({
                     const category =
                       match.category ?? categoriesById.get(match.categoryId);
                     const score = formatMatchScore(match, getMatchCategory(match));
+                    const winnerSide = computeWinnerSide(match);
+                    const teamATone =
+                      winnerSide === "A"
+                        ? "text-emerald-600"
+                        : winnerSide === "B"
+                          ? "text-slate-400"
+                          : "text-slate-900";
+                    const teamBTone =
+                      winnerSide === "B"
+                        ? "text-emerald-600"
+                        : winnerSide === "A"
+                          ? "text-slate-400"
+                          : "text-slate-900";
                     const scoreParts = score ? score.split(" | ") : [];
                     const activeSetIndex =
                       typeof match.liveState?.activeSet === "number"
@@ -1397,15 +1452,31 @@ export default function TournamentPublic({
                         </div>
                         <div className="mt-4 grid gap-2">
                           <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 text-sm">
-                            <span className="font-semibold text-slate-900">
-                              {teamLabel(match.teamA)}
-                            </span>
+                            <div className="text-left">
+                              <span className={`font-semibold ${teamATone}`}>
+                                {teamLabel(match.teamA)}
+                              </span>
+                              {winnerSide === "A" && (
+                                <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-700">
+                                  <span>✔</span>
+                                  Ganador
+                                </div>
+                              )}
+                            </div>
                             <span className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 text-[11px] font-semibold text-slate-600">
                               {mainScore ?? "-"}
                             </span>
-                            <span className="text-right font-semibold text-slate-900">
-                              {teamLabel(match.teamB)}
-                            </span>
+                            <div className="text-right">
+                              <span className={`font-semibold ${teamBTone}`}>
+                                {teamLabel(match.teamB)}
+                              </span>
+                              {winnerSide === "B" && (
+                                <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-700">
+                                  <span>✔</span>
+                                  Ganador
+                                </div>
+                              )}
+                            </div>
                           </div>
                           {detailedScore && (
                             <p className="text-[11px] text-slate-500">{detailedScore}</p>
