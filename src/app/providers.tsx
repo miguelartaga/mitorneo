@@ -2,6 +2,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import type { AuthUser } from "@/types/auth";
+import { ToastProvider } from "@/components/ui/toast";
 
 type AuthContextValue = {
   user: AuthUser | null;
@@ -138,5 +139,9 @@ export default function Providers({ children, initialUser }: ProvidersProps) {
     [user, loading, refresh, login, logout]
   );
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return (
+    <AuthContext.Provider value={value}>
+      <ToastProvider>{children}</ToastProvider>
+    </AuthContext.Provider>
+  );
 }

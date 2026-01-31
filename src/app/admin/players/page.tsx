@@ -55,7 +55,7 @@ export default async function PlayersAdminPage() {
             </span>
           </h1>
           <p className="mt-3 text-base text-slate-600">
-            AAñade jugadores rA­pidamente con solo nombre, apellido y documento.
+            Añade jugadores ra­pidamente con solo nombre, apellido y documento.
             Quedan en estado no confirmado hasta que valides sus datos.
           </p>
           <div className="mt-10">

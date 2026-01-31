@@ -191,9 +191,9 @@ const getStreamEmbedUrl = (value?: string | null) => {
         const normalized =
           host.endsWith("facebook.com") && url.pathname.startsWith("/share/v/")
             ? (() => {
-                const token = url.pathname.split("/").filter(Boolean)[2];
-                return token ? `https://www.facebook.com/watch/?v=${token}` : trimmed;
-              })()
+              const token = url.pathname.split("/").filter(Boolean)[2];
+              return token ? `https://www.facebook.com/watch/?v=${token}` : trimmed;
+            })()
             : trimmed;
         const encoded = encodeURIComponent(normalized);
         return `https://www.facebook.com/plugins/video.php?href=${encoded}&show_text=0&width=1280`;
@@ -414,6 +414,7 @@ export default function TournamentPublic({
   const [tab, setTab] = useState<TabKey>("info");
   const [themeMode, setThemeMode] = useState<"light" | "dark">("light");
   const [participantQuery, setParticipantQuery] = useState("");
+  const [expandedTeams, setExpandedTeams] = useState<Set<string>>(new Set());
   const [expandedResultMatchId, setExpandedResultMatchId] = useState<string | null>(null);
   const [matches, setMatches] = useState<Match[]>(
     Array.isArray(tournament.matches) ? tournament.matches : []
@@ -873,8 +874,8 @@ export default function TournamentPublic({
         expectedRounds > 0
           ? Array.from({ length: expectedRounds }, (_, index) => index + 1)
           : roundNumbers.length > 0
-          ? roundNumbers
-          : [1];
+            ? roundNumbers
+            : [1];
 
       const slotEntriesForOrder = slotEntries.map((slot) => ({
         position: slot.position,
@@ -1352,8 +1353,16 @@ export default function TournamentPublic({
                   <div className="mt-4">
                     <BracketCanvas
                       categoryId={entry.category.id}
-                      matches={entry.matches}
-                      bronzeMatches={entry.bronzeMatches}
+                      matches={entry.matches.map((m) => ({
+                        ...m,
+                        createdAt: m.createdAt ?? undefined,
+                        orderHint: m.orderHint ?? undefined,
+                      }))}
+                      bronzeMatches={entry.bronzeMatches.map((m) => ({
+                        ...m,
+                        createdAt: m.createdAt ?? undefined,
+                        orderHint: m.orderHint ?? undefined,
+                      }))}
                       roundNumbers={entry.roundNumbers}
                       roundLabelMap={entry.roundLabelMap}
                       bracketSize={entry.bracketSize}
@@ -1445,33 +1454,33 @@ export default function TournamentPublic({
                               </thead>
                               <tbody className="divide-y divide-white/5">
                                 {group.entries.map((entryItem, index) => {
-                                const registration = registrationById.get(entryItem.id);
-                                const setsDiff =
-                                  entryItem.setsWon - entryItem.setsLost;
-                                const pointsDiff =
-                                  entryItem.pointsWon - entryItem.pointsLost;
-                                return (
-                                  <tr key={entryItem.id}>
-                                    <td className="px-3 py-2 text-cyan-200">
-                                      {index + 1}
-                                    </td>
-                                    <td className="px-3 py-2 font-semibold text-slate-900">
-                                      {teamLabel(registration)}
-                                    </td>
-                                    <td className="px-3 py-2">
-                                      {entryItem.matchesWon + entryItem.matchesLost}
-                                    </td>
-                                    <td className="px-3 py-2">{entryItem.matchesWon}</td>
-                                    <td className="px-3 py-2">{entryItem.matchesLost}</td>
-                                    <td className="px-3 py-2">{entryItem.points}</td>
-                                    <td className="px-3 py-2">{entryItem.setsWon}</td>
-                                    <td className="px-3 py-2">{entryItem.setsLost}</td>
-                                    <td className="px-3 py-2">{setsDiff}</td>
-                                    <td className="px-3 py-2">{entryItem.pointsWon}</td>
-                                    <td className="px-3 py-2">{entryItem.pointsLost}</td>
-                                    <td className="px-3 py-2">{pointsDiff}</td>
-                                  </tr>
-                                );
+                                  const registration = registrationById.get(entryItem.id);
+                                  const setsDiff =
+                                    entryItem.setsWon - entryItem.setsLost;
+                                  const pointsDiff =
+                                    entryItem.pointsWon - entryItem.pointsLost;
+                                  return (
+                                    <tr key={entryItem.id}>
+                                      <td className="px-3 py-2 text-cyan-200">
+                                        {index + 1}
+                                      </td>
+                                      <td className="px-3 py-2 font-semibold text-slate-900">
+                                        {teamLabel(registration)}
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        {entryItem.matchesWon + entryItem.matchesLost}
+                                      </td>
+                                      <td className="px-3 py-2">{entryItem.matchesWon}</td>
+                                      <td className="px-3 py-2">{entryItem.matchesLost}</td>
+                                      <td className="px-3 py-2">{entryItem.points}</td>
+                                      <td className="px-3 py-2">{entryItem.setsWon}</td>
+                                      <td className="px-3 py-2">{entryItem.setsLost}</td>
+                                      <td className="px-3 py-2">{setsDiff}</td>
+                                      <td className="px-3 py-2">{entryItem.pointsWon}</td>
+                                      <td className="px-3 py-2">{entryItem.pointsLost}</td>
+                                      <td className="px-3 py-2">{pointsDiff}</td>
+                                    </tr>
+                                  );
                                 })}
                               </tbody>
                             </table>
@@ -1499,11 +1508,11 @@ export default function TournamentPublic({
                         </div>
                       </div>
                     )}
-                </div>
-              ))
-            )}
-          </section>
-        )}
+                  </div>
+                ))
+              )}
+            </section>
+          )}
 
         {tab === "results" && (
           <section className="mt-8 space-y-6">
@@ -1577,33 +1586,33 @@ export default function TournamentPublic({
                         ? null
                         : scoreParts.length
                           ? scoreParts
-                              .map(
-                                (part, index) =>
-                                  `${unitLabel} ${index + 1}: ${part}`
-                              )
-                              .join(" - ")
+                            .map(
+                              (part, index) =>
+                                `${unitLabel} ${index + 1}: ${part}`
+                            )
+                            .join(" - ")
                           : null;
                     const setLeadLabel =
                       activeSetIndex !== null && activeSetIndex > 0
                         ? (() => {
-                            let aWins = 0;
-                            let bWins = 0;
-                            for (let i = 0; i < activeSetIndex; i += 1) {
-                              const part = scoreParts[i];
-                              if (!part) continue;
-                              const [aRaw, bRaw] = part.split("-");
-                              const aVal = Number(aRaw);
-                              const bVal = Number(bRaw);
-                              if (!Number.isFinite(aVal) || !Number.isFinite(bVal)) {
-                                continue;
-                              }
-                              if (aVal > bVal) aWins += 1;
-                              if (bVal > aVal) bWins += 1;
+                          let aWins = 0;
+                          let bWins = 0;
+                          for (let i = 0; i < activeSetIndex; i += 1) {
+                            const part = scoreParts[i];
+                            if (!part) continue;
+                            const [aRaw, bRaw] = part.split("-");
+                            const aVal = Number(aRaw);
+                            const bVal = Number(bRaw);
+                            if (!Number.isFinite(aVal) || !Number.isFinite(bVal)) {
+                              continue;
                             }
-                            const label =
-                              unitLabel === "Cancha" ? "Cancha a favor" : "Set a favor";
-                            return `${label} ${aWins}-${bWins}`;
-                          })()
+                            if (aVal > bVal) aWins += 1;
+                            if (bVal > aVal) bWins += 1;
+                          }
+                          const label =
+                            unitLabel === "Cancha" ? "Cancha a favor" : "Set a favor";
+                          return `${label} ${aWins}-${bWins}`;
+                        })()
                         : null;
                     const isLive = Boolean(match.liveState?.isLive);
                     const isFinished = isMatchComplete(match);
@@ -1632,11 +1641,10 @@ export default function TournamentPublic({
                             );
                           }
                         }}
-                        className={`rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 ${
-                          isFrontonMatch && (teamABonuses.length > 0 || teamBBonuses.length > 0)
-                            ? "cursor-pointer transition hover:border-cyan-400/40"
-                            : ""
-                        }`}
+                        className={`rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 ${isFrontonMatch && (teamABonuses.length > 0 || teamBBonuses.length > 0)
+                          ? "cursor-pointer transition hover:border-cyan-400/40"
+                          : ""
+                          }`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -1801,11 +1809,10 @@ export default function TournamentPublic({
                       key={`${stream.url}-${index}`}
                       type="button"
                       onClick={() => setActiveLiveIndex(index)}
-                      className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${
-                        index === activeLiveIndex
-                          ? "bg-cyan-500/20 text-cyan-200"
-                          : "border border-[var(--border)] bg-[var(--surface-2)] text-slate-500"
-                      }`}
+                      className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${index === activeLiveIndex
+                        ? "bg-cyan-500/20 text-cyan-200"
+                        : "border border-[var(--border)] bg-[var(--surface-2)] text-slate-500"
+                        }`}
                     >
                       {stream.title?.trim() || `En vivo ${index + 1}`}
                     </button>

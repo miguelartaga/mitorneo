@@ -1,4 +1,5 @@
 import { getServerSession } from "@/lib/auth";
+import path from "path";
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import crypto from "crypto";

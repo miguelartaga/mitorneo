@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useToast } from "@/components/ui/toast";
 
 type League = {
   id: string;
@@ -27,8 +28,8 @@ export default function TournamentStepOne({ leagues }: Props) {
     clubs: [createEmptyClub()],
   });
   const [loading, setLoading] = useState(false);
+  const { success, error: toastError } = useToast();
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
 
   const canSubmit = useMemo(() => {
     if (!form.name.trim()) return false;
@@ -58,7 +59,6 @@ export default function TournamentStepOne({ leagues }: Props) {
 
   const handleSubmit = async () => {
     setError(null);
-    setMessage(null);
     setLoading(true);
 
     try {
@@ -82,21 +82,30 @@ export default function TournamentStepOne({ leagues }: Props) {
 
       if (!res.ok) {
         const detail = data?.detail ? ` (${data.detail})` : "";
-        setError(`${data?.error ?? "No se pudo crear el torneo"}${detail}`);
+        const msg = `${data?.error ?? "No se pudo crear el torneo"}${detail}`;
+        setError(msg);
+        toastError(msg);
         return;
       }
 
       if (!data?.tournament?.id) {
-        setError("No se pudo abrir el siguiente paso");
+        const msg = "No se pudo abrir el siguiente paso";
+        setError(msg);
+        toastError(msg);
         return;
       }
 
-      const nextUrl = `/admin/tournaments/${String(data.tournament.id)}/step-2`;
-      window.location.assign(nextUrl);
+      success("Torneo creado exitosamente");
+      // Small delay to show toast before redirect
+      setTimeout(() => {
+        const nextUrl = `/admin/tournaments/${String(data.tournament.id)}/step-2`;
+        window.location.assign(nextUrl);
+      }, 1000);
     } catch (err) {
-      const message =
+      const msg =
         err instanceof Error ? err.message : "No se pudo conectar al servidor";
-      setError(message);
+      setError(msg);
+      toastError(msg);
     } finally {
       setLoading(false);
     }
@@ -267,11 +276,6 @@ export default function TournamentStepOne({ leagues }: Props) {
 
       {error && (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
-      )}
-      {message && (
-        <p className="rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
-          {message}
-        </p>
       )}
     </div>
   );

@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { Upload } from "lucide-react";
 
 type PlayerStatus = "UNCONFIRMED" | "CONFIRMED";
 type DocumentType = "ID_CARD" | "PASSPORT";
@@ -225,8 +226,8 @@ export default function PlayersManager({
       typeof player.dateOfBirth === "string" && player.dateOfBirth
         ? player.dateOfBirth.split("T")[0]
         : player.dateOfBirth
-        ? new Date(player.dateOfBirth).toISOString().split("T")[0]
-        : "";
+          ? new Date(player.dateOfBirth).toISOString().split("T")[0]
+          : "";
     setForm({
       documentType: player.documentType,
       documentNumber: player.documentNumber,
@@ -329,9 +330,9 @@ export default function PlayersManager({
       <div className="admin-fade-up relative overflow-hidden rounded-[28px] border border-white/70 bg-white/80 p-6 shadow-[0_24px_70px_-50px_rgba(15,23,42,0.35)] ring-1 ring-slate-200/70 backdrop-blur">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-indigo-300/70 via-sky-300/60 to-amber-200/70" />
         <h2 className="text-2xl font-semibold text-slate-900">Agregar jugador</h2>
-          <p className="text-sm text-slate-600">
-            Solo nombre, apellido y documento son obligatorios. El resto es opcional.
-          </p>
+        <p className="text-sm text-slate-600">
+          Solo nombre, apellido y documento son obligatorios. El resto es opcional.
+        </p>
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
@@ -456,17 +457,21 @@ export default function PlayersManager({
               placeholder="https://... o usa el botón de subir"
             />
             <div className="flex items-center gap-3">
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => handlePhotoUpload(e.target.files?.[0])}
-                className="text-sm text-slate-700"
-              />
+              <label className="cursor-pointer inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
+                <Upload className="h-4 w-4" />
+                <span>Subir</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handlePhotoUpload(e.target.files?.[0])}
+                  className="hidden"
+                />
+              </label>
               {uploadingPhoto && (
-                <span className="text-xs text-slate-500">Subiendo...</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">Subiendo...</span>
               )}
               {form.photoUrl && !uploadingPhoto && (
-                <span className="text-xs text-emerald-700">Foto lista</span>
+                <span className="text-xs text-emerald-700 dark:text-emerald-400">Foto lista</span>
               )}
             </div>
             {form.photoUrl && (
@@ -505,8 +510,8 @@ export default function PlayersManager({
             {loading
               ? "Guardando..."
               : editingId
-              ? "Actualizar jugador"
-              : "Crear jugador"}
+                ? "Actualizar jugador"
+                : "Crear jugador"}
           </button>
           {editingId && (
             <button
@@ -542,9 +547,9 @@ export default function PlayersManager({
         </div>
         {filteredPlayers.length === 0 ? (
           <p className="mt-2 text-sm text-slate-600">No hay jugadores registrados.</p>
-          ) : (
-            <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-200/70 bg-white/80 shadow-[0_10px_24px_-20px_rgba(15,23,42,0.2)]">
-              <table className="min-w-[640px] divide-y divide-slate-200/70 text-sm">
+        ) : (
+          <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-200/70 bg-white/80 shadow-[0_10px_24px_-20px_rgba(15,23,42,0.2)]">
+            <table className="min-w-[640px] divide-y divide-slate-200/70 text-sm">
               <thead className="bg-slate-50/80 text-[11px] uppercase tracking-[0.2em] text-slate-500">
                 <tr>
                   <th className="px-3 py-3 text-left font-semibold text-slate-700">Jugador</th>
@@ -584,11 +589,10 @@ export default function PlayersManager({
                     </td>
                     <td className="px-3 py-2">
                       <span
-                        className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${
-                          player.status === "CONFIRMED"
-                            ? "bg-emerald-100 text-emerald-800"
-                            : "bg-amber-100 text-amber-800"
-                        }`}
+                        className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${player.status === "CONFIRMED"
+                          ? "bg-emerald-100 text-emerald-800"
+                          : "bg-amber-100 text-amber-800"
+                          }`}
                       >
                         {statusCopy[player.status]}
                       </span>

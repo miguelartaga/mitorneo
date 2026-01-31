@@ -2,6 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 import { useState } from "react";
+import { Upload } from "lucide-react";
 
 type Season = {
   id: string;
@@ -362,17 +363,21 @@ export default function LeaguesManager({ initialLeagues, currentUserId, isAdmin 
               placeholder="https://... o usa el boton de subir"
             />
             <div className="flex items-center gap-3">
-              <input
-                type="file"
-                accept="image/*"
-                onChange={(e) => handleLeaguePhotoUpload(e.target.files?.[0])}
-                className="text-sm text-slate-700"
-              />
+              <label className="cursor-pointer inline-flex items-center gap-2 rounded-xl bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
+                <Upload className="h-4 w-4" />
+                <span>Subir</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => handleLeaguePhotoUpload(e.target.files?.[0])}
+                  className="hidden"
+                />
+              </label>
               {uploadingPhoto && (
-                <span className="text-xs text-slate-500">Subiendo...</span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">Subiendo...</span>
               )}
               {leagueForm.photoUrl && !uploadingPhoto && (
-                <span className="text-xs text-emerald-700">Foto lista</span>
+                <span className="text-xs text-emerald-700 dark:text-emerald-400">Foto lista</span>
               )}
             </div>
             {leagueForm.photoUrl && (
