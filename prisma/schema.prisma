@@ -175,6 +175,9 @@ model Tournament {
   endDate              DateTime?
   registrationDeadline DateTime?
   rulesText            String?          @db.Text
+  liveStreamTitle      String?
+  liveStreamUrl        String?          @db.Text
+  liveStreams          Json?
   playDays             Json?
   rankingEnabled       Boolean          @default(true)
   paymentRate          Decimal          @default(0) @db.Decimal(10, 2)

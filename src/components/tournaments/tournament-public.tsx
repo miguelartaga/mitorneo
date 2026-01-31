@@ -34,6 +34,7 @@ type TabKey =
   | "bracket"
   | "fixture"
   | "results"
+  | "live"
   | "prizes"
   | "contact";
 
@@ -47,6 +48,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "bracket", label: "Brackets" },
   { key: "fixture", label: "Fixture" },
   { key: "results", label: "Resultados" },
+  { key: "live", label: "En vivo" },
   { key: "prizes", label: "Premios" },
   { key: "contact", label: "Contacto" },
 ];
@@ -165,6 +167,104 @@ const formatMatchScore = (match: Match, category?: Category | null) => {
   return parts.join(" | ");
 };
 
+const getStreamEmbedUrl = (value?: string | null) => {
+  if (!value || typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const iframeSrcMatch = trimmed.match(/<iframe[^>]*\s+src=["']([^"']+)["'][^>]*>/i);
+  if (iframeSrcMatch?.[1]) {
+    return iframeSrcMatch[1];
+  }
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    if (trimmed.includes("youtube.com/embed/")) return trimmed;
+    const host = url.hostname.replace(/^www\./, "");
+    const parentHost =
+      typeof window !== "undefined" ? window.location.hostname : null;
+    if (host === "youtu.be") {
+      const id = url.pathname.split("/").filter(Boolean)[0];
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    }
+    if (!host.endsWith("youtube.com")) {
+      if (host.endsWith("facebook.com") || host === "fb.watch") {
+        const normalized =
+          host.endsWith("facebook.com") && url.pathname.startsWith("/share/v/")
+            ? (() => {
+                const token = url.pathname.split("/").filter(Boolean)[2];
+                return token ? `https://www.facebook.com/watch/?v=${token}` : trimmed;
+              })()
+            : trimmed;
+        const encoded = encodeURIComponent(normalized);
+        return `https://www.facebook.com/plugins/video.php?href=${encoded}&show_text=0&width=1280`;
+      }
+      if (host.endsWith("twitch.tv") || host === "player.twitch.tv") {
+        if (!parentHost) return null;
+        if (host === "player.twitch.tv") {
+          const hasParent = url.searchParams.has("parent");
+          if (!hasParent) {
+            url.searchParams.append("parent", parentHost);
+          }
+          return url.toString();
+        }
+        if (host === "clips.twitch.tv") {
+          const clipId = url.pathname.split("/").filter(Boolean)[0];
+          return clipId
+            ? `https://clips.twitch.tv/embed?clip=${clipId}&parent=${parentHost}`
+            : null;
+        }
+        const segments = url.pathname.split("/").filter(Boolean);
+        if (segments[0] === "videos" && segments[1]) {
+          return `https://player.twitch.tv/?video=${segments[1]}&parent=${parentHost}`;
+        }
+        if (segments[0]) {
+          return `https://player.twitch.tv/?channel=${segments[0]}&parent=${parentHost}`;
+        }
+        return null;
+      }
+      return trimmed;
+    }
+    if (url.pathname.startsWith("/watch")) {
+      const id = url.searchParams.get("v");
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    }
+    if (url.pathname.startsWith("/live/")) {
+      const id = url.pathname.split("/").filter(Boolean)[1];
+      return id ? `https://www.youtube.com/embed/${id}` : null;
+    }
+    if (url.pathname.startsWith("/embed/")) {
+      return trimmed;
+    }
+    return trimmed;
+  } catch {
+    return null;
+  }
+};
+
+const normalizeLiveStreams = (
+  streams?: { title?: string | null; url?: string | null }[],
+  fallbackTitle?: string | null,
+  fallbackUrl?: string | null
+) => {
+  const base = Array.isArray(streams) ? streams : [];
+  const normalized = base
+    .filter((entry) => entry && typeof entry === "object")
+    .map((entry) => ({
+      title: typeof entry.title === "string" ? entry.title.trim() : "",
+      url: typeof entry.url === "string" ? entry.url.trim() : "",
+    }))
+    .filter((entry) => entry.url.length > 0);
+  if (normalized.length > 0) return normalized;
+  const fallbackUrlValue = typeof fallbackUrl === "string" ? fallbackUrl.trim() : "";
+  if (!fallbackUrlValue) return [];
+  return [
+    {
+      title: typeof fallbackTitle === "string" ? fallbackTitle.trim() : "",
+      url: fallbackUrlValue,
+    },
+  ];
+};
+
 const parseGames = (value: unknown) => {
   if (!Array.isArray(value)) return [] as { a: number; b: number }[];
   const games: { a: number; b: number }[] = [];
@@ -263,6 +363,40 @@ const teamMembersLabel = (registration?: Registration | null) => {
   return members.map((member) => `${member.firstName} ${member.lastName}`).join(" / ");
 };
 
+const isFrontonSport = (name?: string | null) =>
+  Boolean(name && name.toLowerCase().includes("fronton"));
+
+const formatFrontonTeamDetails = (registration?: Registration | null) => {
+  if (!registration) return null;
+  const members = [registration.player, registration.partner, registration.partnerTwo].filter(
+    Boolean
+  ) as Player[];
+  if (members.length === 0) return null;
+  const names = members.map((member) => `${member.firstName} ${member.lastName}`).join(" / ");
+  if (members.length === 3) return `Triples: ${names}`;
+  if (members.length === 2) return `Dobles: ${names}`;
+  return `Individual: ${names}`;
+};
+
+const formatFrontonPlayerBonuses = (
+  registration?: Registration | null,
+  bonusByPlayer?: Record<string, { double?: number; triple?: number }>
+) => {
+  if (!registration) return [];
+  const members = [registration.player, registration.partner, registration.partnerTwo].filter(
+    Boolean
+  ) as Player[];
+  return members.map((member) => {
+    const stats = bonusByPlayer?.[member.id] ?? { double: 0, triple: 0 };
+    return {
+      id: member.id,
+      label: `${member.firstName} ${member.lastName}`,
+      double: Number(stats.double ?? 0),
+      triple: Number(stats.triple ?? 0),
+    };
+  });
+};
+
 const registrationLocation = (registration: Registration) => {
   const members = [registration.player, registration.partner, registration.partnerTwo].filter(
     Boolean
@@ -280,6 +414,7 @@ export default function TournamentPublic({
   const [tab, setTab] = useState<TabKey>("info");
   const [themeMode, setThemeMode] = useState<"light" | "dark">("light");
   const [participantQuery, setParticipantQuery] = useState("");
+  const [expandedResultMatchId, setExpandedResultMatchId] = useState<string | null>(null);
   const [matches, setMatches] = useState<Match[]>(
     Array.isArray(tournament.matches) ? tournament.matches : []
   );
@@ -287,6 +422,24 @@ export default function TournamentPublic({
     Array.isArray(tournament.playoffSlots) ? tournament.playoffSlots : []
   );
   const [matchesError, setMatchesError] = useState<string | null>(null);
+  const liveStreams = useMemo(
+    () =>
+      normalizeLiveStreams(
+        tournament.liveStreams,
+        tournament.liveStreamTitle,
+        tournament.liveStreamUrl
+      ),
+    [tournament.liveStreams, tournament.liveStreamTitle, tournament.liveStreamUrl]
+  );
+  const [activeLiveIndex, setActiveLiveIndex] = useState(0);
+  useEffect(() => {
+    setActiveLiveIndex(0);
+  }, [tournament.liveStreams, tournament.liveStreamTitle, tournament.liveStreamUrl]);
+  const activeLiveStream = liveStreams[activeLiveIndex] ?? liveStreams[0] ?? null;
+  const liveStreamEmbedUrl = useMemo(
+    () => getStreamEmbedUrl(activeLiveStream?.url ?? null),
+    [activeLiveStream?.url]
+  );
   const schedulePublished = Boolean(tournament.schedulePublished);
   const groupsPublished = Boolean(tournament.groupsPublished);
   const playoffsPublished = Boolean(tournament.playoffsPublished);
@@ -297,9 +450,10 @@ export default function TournamentPublic({
         if (!groupsPublished && item.key === "groups") return false;
         if (!groupsPublished && item.key === "standings") return false;
         if (!playoffsPublished && item.key === "bracket") return false;
+        if (item.key === "live" && liveStreams.length === 0) return false;
         return true;
       }),
-    [schedulePublished, groupsPublished, playoffsPublished]
+    [schedulePublished, groupsPublished, playoffsPublished, liveStreams.length]
   );
 
   useEffect(() => {
@@ -926,33 +1080,48 @@ export default function TournamentPublic({
           </div>
 
           {tournament.sponsors.length > 0 && (
-            <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3">
-              {tournament.sponsors.map((sponsor, index) => {
-                const content = (
-                  <div className="flex h-14 w-32 items-center justify-center rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 py-2">
-                    <img
-                      src={sponsor.imageUrl}
-                      alt={sponsor.name ?? `Auspiciador ${index + 1}`}
-                      className="max-h-full max-w-full object-contain"
-                    />
-                  </div>
-                );
-                if (sponsor.linkUrl) {
-                  return (
-                    <a
-                      key={`${sponsor.imageUrl}-${index}`}
-                      href={sponsor.linkUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {content}
-                    </a>
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-slate-400">
+                    Auspiciadores
+                  </p>
+                  <p className="mt-2 text-sm text-slate-600">
+                    Gracias a quienes apoyan el torneo
+                  </p>
+                </div>
+                <span className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  {tournament.sponsors.length} logos
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                {tournament.sponsors.map((sponsor, index) => {
+                  const content = (
+                    <div className="group flex h-20 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3 transition hover:-translate-y-0.5 hover:border-cyan-400/40 hover:bg-white/60">
+                      <img
+                        src={sponsor.imageUrl}
+                        alt={sponsor.name ?? `Auspiciador ${index + 1}`}
+                        className="max-h-10 w-auto object-contain transition group-hover:scale-105"
+                      />
+                    </div>
                   );
-                }
-                return (
-                  <div key={`${sponsor.imageUrl}-${index}`}>{content}</div>
-                );
-              })}
+                  if (sponsor.linkUrl) {
+                    return (
+                      <a
+                        key={`${sponsor.imageUrl}-${index}`}
+                        href={sponsor.linkUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {content}
+                      </a>
+                    );
+                  }
+                  return (
+                    <div key={`${sponsor.imageUrl}-${index}`}>{content}</div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </div>
@@ -1359,6 +1528,23 @@ export default function TournamentPublic({
                   .map((match) => {
                     const category =
                       match.category ?? categoriesById.get(match.categoryId);
+                    const isFrontonMatch = isFrontonSport(
+                      category?.sport?.name ?? tournament.sport?.name
+                    );
+                    const teamADetails = isFrontonMatch
+                      ? formatFrontonTeamDetails(match.teamA)
+                      : null;
+                    const teamBDetails = isFrontonMatch
+                      ? formatFrontonTeamDetails(match.teamB)
+                      : null;
+                    const bonusByPlayer = match.liveState?.bonusByPlayer ?? undefined;
+                    const teamABonuses = isFrontonMatch
+                      ? formatFrontonPlayerBonuses(match.teamA, bonusByPlayer)
+                      : [];
+                    const teamBBonuses = isFrontonMatch
+                      ? formatFrontonPlayerBonuses(match.teamB, bonusByPlayer)
+                      : [];
+                    const isExpanded = expandedResultMatchId === match.id;
                     const score = formatMatchScore(match, getMatchCategory(match));
                     const winnerSide = computeWinnerSide(match);
                     const teamATone =
@@ -1427,7 +1613,30 @@ export default function TournamentPublic({
                     return (
                       <div
                         key={match.id}
-                        className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6"
+                        role={isFrontonMatch ? "button" : undefined}
+                        tabIndex={isFrontonMatch ? 0 : undefined}
+                        onClick={() => {
+                          if (!isFrontonMatch) return;
+                          if (teamABonuses.length === 0 && teamBBonuses.length === 0) return;
+                          setExpandedResultMatchId((prev) =>
+                            prev === match.id ? null : match.id
+                          );
+                        }}
+                        onKeyDown={(event) => {
+                          if (!isFrontonMatch) return;
+                          if (teamABonuses.length === 0 && teamBBonuses.length === 0) return;
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault();
+                            setExpandedResultMatchId((prev) =>
+                              prev === match.id ? null : match.id
+                            );
+                          }
+                        }}
+                        className={`rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 ${
+                          isFrontonMatch && (teamABonuses.length > 0 || teamBBonuses.length > 0)
+                            ? "cursor-pointer transition hover:border-cyan-400/40"
+                            : ""
+                        }`}
                       >
                         <div className="flex items-start justify-between gap-3">
                           <div>
@@ -1439,6 +1648,11 @@ export default function TournamentPublic({
                               {match.startTime ? ` - ${match.startTime}` : ""}
                             </p>
                           </div>
+                          {isFrontonMatch && (teamABonuses.length > 0 || teamBBonuses.length > 0) && (
+                            <span className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                              {isExpanded ? "Ocultar detalles" : "Ver detalles"}
+                            </span>
+                          )}
                           {isLive && (
                             <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-rose-200">
                               En vivo
@@ -1456,6 +1670,11 @@ export default function TournamentPublic({
                               <span className={`font-semibold ${teamATone}`}>
                                 {teamLabel(match.teamA)}
                               </span>
+                              {teamADetails && (
+                                <p className="mt-1 text-[11px] text-slate-500">
+                                  {teamADetails}
+                                </p>
+                              )}
                               {winnerSide === "A" && (
                                 <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-700">
                                   <span>✔</span>
@@ -1470,6 +1689,11 @@ export default function TournamentPublic({
                               <span className={`font-semibold ${teamBTone}`}>
                                 {teamLabel(match.teamB)}
                               </span>
+                              {teamBDetails && (
+                                <p className="mt-1 text-[11px] text-slate-500">
+                                  {teamBDetails}
+                                </p>
+                              )}
                               {winnerSide === "B" && (
                                 <div className="mt-1 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-emerald-700">
                                   <span>✔</span>
@@ -1485,11 +1709,145 @@ export default function TournamentPublic({
                             <p className="text-[11px] text-slate-500">{setLeadLabel}</p>
                           )}
                         </div>
+                        {isExpanded && isFrontonMatch && (teamABonuses.length > 0 || teamBBonuses.length > 0) && (
+                          <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-2)]">
+                            <div className="grid grid-cols-2 border-b border-[var(--border)] bg-[var(--surface)] text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                              <div className="px-4 py-2">{teamLabel(match.teamA)}</div>
+                              <div className="px-4 py-2 text-right">{teamLabel(match.teamB)}</div>
+                            </div>
+                            <div className="grid grid-cols-2 text-[11px] text-slate-500">
+                              <div className="px-4 py-3">
+                                {teamABonuses.length > 0 ? (
+                                  <table className="w-full text-left text-[11px]">
+                                    <thead className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                                      <tr>
+                                        <th className="py-1 font-semibold">Jugador</th>
+                                        <th className="py-1 text-right font-semibold">Dobles</th>
+                                        <th className="py-1 text-right font-semibold">Triples</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {teamABonuses.map((entry) => (
+                                        <tr key={`${match.id}-A-detail-${entry.id}`}>
+                                          <td className="py-1">{entry.label}</td>
+                                          <td className="py-1 text-right">{entry.double}</td>
+                                          <td className="py-1 text-right">{entry.triple}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                ) : (
+                                  <p>Sin dobles ni triples.</p>
+                                )}
+                              </div>
+                              <div className="px-4 py-3">
+                                {teamBBonuses.length > 0 ? (
+                                  <table className="w-full text-left text-[11px]">
+                                    <thead className="text-[10px] uppercase tracking-[0.2em] text-slate-400">
+                                      <tr>
+                                        <th className="py-1 font-semibold">Jugador</th>
+                                        <th className="py-1 text-right font-semibold">Dobles</th>
+                                        <th className="py-1 text-right font-semibold">Triples</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {teamBBonuses.map((entry) => (
+                                        <tr key={`${match.id}-B-detail-${entry.id}`}>
+                                          <td className="py-1">{entry.label}</td>
+                                          <td className="py-1 text-right">{entry.double}</td>
+                                          <td className="py-1 text-right">{entry.triple}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                ) : (
+                                  <p className="text-right">Sin dobles ni triples.</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
               </div>
             )}
+          </section>
+        )}
+
+        {tab === "live" && (
+          <section className="mt-8 space-y-6">
+            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.25em] text-cyan-200/80">
+                    En vivo
+                  </p>
+                  <h3 className="mt-2 text-xl font-semibold text-slate-900">
+                    {activeLiveStream?.title?.trim() || "Transmision en vivo"}
+                  </h3>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Sigue el partido desde esta pagina.
+                  </p>
+                </div>
+                <span className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                  Streaming
+                </span>
+              </div>
+              {liveStreams.length > 1 && (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {liveStreams.map((stream, index) => (
+                    <button
+                      key={`${stream.url}-${index}`}
+                      type="button"
+                      onClick={() => setActiveLiveIndex(index)}
+                      className={`rounded-full px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] ${
+                        index === activeLiveIndex
+                          ? "bg-cyan-500/20 text-cyan-200"
+                          : "border border-[var(--border)] bg-[var(--surface-2)] text-slate-500"
+                      }`}
+                    >
+                      {stream.title?.trim() || `En vivo ${index + 1}`}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {liveStreamEmbedUrl ? (
+                <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--border)] bg-black">
+                  <div className="relative w-full pt-[56.25%]">
+                    <iframe
+                      src={liveStreamEmbedUrl}
+                      title={activeLiveStream?.title ?? "Transmision en vivo"}
+                      className="absolute inset-0 h-full w-full"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      allowFullScreen
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+                </div>
+              ) : activeLiveStream?.url ? (
+                <p className="mt-4 text-sm text-slate-500">
+                  El proveedor no permite incrustar el video. Usa el enlace directo.
+                </p>
+              ) : (
+                <p className="mt-4 text-sm text-slate-500">
+                  No hay un enlace de transmision configurado.
+                </p>
+              )}
+              {activeLiveStream?.url && (
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+                  <span>Si el reproductor no carga, abre el enlace directo.</span>
+                  <a
+                    href={activeLiveStream.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 font-semibold uppercase tracking-[0.2em] text-slate-500"
+                  >
+                    Abrir transmision
+                  </a>
+                </div>
+              )}
+            </div>
           </section>
         )}
         {

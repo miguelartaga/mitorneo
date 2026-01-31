@@ -201,6 +201,7 @@ export default function TournamentPublicFixture({
     const [fixtureDay, setFixtureDay] = useState<string | null>(null);
     const [fixtureQuery, setFixtureQuery] = useState("");
     const [fixtureCategory, setFixtureCategory] = useState("all");
+    const [fixtureCourt, setFixtureCourt] = useState("all");
 
     const normalizeText = (value: string) =>
         value
@@ -215,13 +216,45 @@ export default function TournamentPublicFixture({
         return list;
     }, [categoriesById]);
 
+    const courtOptions = useMemo(() => {
+        const set = new Set<string>();
+        (Array.isArray(matches) ? matches : []).forEach((match) => {
+            const value =
+                typeof match.courtNumber === "number" || typeof match.courtNumber === "string"
+                    ? String(match.courtNumber)
+                    : "";
+            if (!value) return;
+            set.add(value);
+        });
+        const list = Array.from(set);
+        list.sort((a, b) => {
+            const aNum = Number(a);
+            const bNum = Number(b);
+            const aIsNum = Number.isFinite(aNum);
+            const bIsNum = Number.isFinite(bNum);
+            if (aIsNum && bIsNum) return aNum - bNum;
+            return a.localeCompare(b);
+        });
+        return list;
+    }, [matches]);
+
     const filteredMatches = useMemo(() => {
         const categoryFilter = fixtureCategory !== "all" ? fixtureCategory : null;
+        const courtFilter = fixtureCourt !== "all" ? fixtureCourt : null;
         const query = normalizeText(fixtureQuery);
         const baseMatches = Array.isArray(matches) ? matches : [];
 
         return baseMatches.filter((match) => {
             if (categoryFilter && match.categoryId !== categoryFilter) return false;
+            if (courtFilter) {
+                if (courtFilter === "sin-cancha") {
+                    if (match.courtNumber !== null && match.courtNumber !== undefined) {
+                        return false;
+                    }
+                } else if (String(match.courtNumber ?? "") !== courtFilter) {
+                    return false;
+                }
+            }
             if (!query) return true;
             const category = match.category ?? categoriesById.get(match.categoryId);
             const safePlayoffLabel = match.stage === "PLAYOFF"
@@ -239,11 +272,12 @@ export default function TournamentPublicFixture({
                 match.groupName ?? "",
                 safePlayoffLabel,
                 match.startTime ?? "",
+                match.courtNumber ? `cancha ${match.courtNumber}` : "",
             ];
             const haystack = normalizeText(textParts.join(" "));
             return haystack.includes(query);
         });
-    }, [matches, categoriesById, fixtureCategory, fixtureQuery]);
+    }, [matches, categoriesById, fixtureCategory, fixtureCourt, fixtureQuery]);
 
     const matchesByDate = useMemo(() => {
         const map = new Map<string, Match[]>();
@@ -303,7 +337,7 @@ export default function TournamentPublicFixture({
     return (
         <div>
             <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-4">
-                <div className="grid gap-3 md:grid-cols-[1.4fr_1fr]">
+                <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_0.8fr]">
                     <div className="space-y-1">
                         <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
                             Buscar jugador / equipo
@@ -328,6 +362,24 @@ export default function TournamentPublicFixture({
                             {categoryOptions.map((category) => (
                                 <option key={category.id} value={category.id}>
                                     {category.name} ({category.abbreviation})
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <div className="space-y-1">
+                        <label className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+                            Cancha
+                        </label>
+                        <select
+                            value={fixtureCourt}
+                            onChange={(e) => setFixtureCourt(e.target.value)}
+                            className="w-full rounded-xl border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm text-slate-700 shadow-sm focus:border-cyan-300 focus:outline-none focus:ring-2 focus:ring-cyan-200/40"
+                        >
+                            <option value="all">Todas</option>
+                            <option value="sin-cancha">Sin cancha</option>
+                            {courtOptions.map((court) => (
+                                <option key={`court-${court}`} value={court}>
+                                    Cancha {court}
                                 </option>
                             ))}
                         </select>
@@ -358,6 +410,7 @@ export default function TournamentPublicFixture({
                                 );
                             }
 
+                            const count = matchesByDate.get(dateKey)?.length ?? 0;
                             return (
                                 <button
                                     key={dateKey}
@@ -376,6 +429,9 @@ export default function TournamentPublicFixture({
                                     <span className={`text-[10px] ${isSelected ? "text-slate-500" : "text-slate-400"}`}>
                                         {year}
                                     </span>
+                                    <span className="mt-1 rounded-full border border-[var(--border)] bg-[var(--surface)] px-2 py-0.5 text-[9px] font-semibold text-slate-500">
+                                        {count} partidos
+                                    </span>
                                 </button>
                             );
                         })}
@@ -385,11 +441,16 @@ export default function TournamentPublicFixture({
             {
                 fixtureDay && matchesByDate.has(fixtureDay) && (
                     <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
-                        <h3 className="text-lg font-semibold text-slate-900">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                            <h3 className="text-lg font-semibold text-slate-900">
                             {fixtureDay === "sin-fecha"
                                 ? "Sin fecha asignada"
                                 : formatDateLong(fixtureDay)}
-                        </h3>
+                            </h3>
+                            <span className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 text-[11px] font-semibold text-slate-500">
+                                {(matchesByDate.get(fixtureDay) ?? []).length} partidos
+                            </span>
+                        </div>
 
                         {/* Mobile View: Cards */}
                         <div className="mt-4 grid gap-4 md:hidden">

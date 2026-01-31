@@ -72,6 +72,9 @@ type Tournament = {
   sportId: string | null;
   address: string | null;
   photoUrl: string | null;
+  liveStreamTitle?: string | null;
+  liveStreamUrl?: string | null;
+  liveStreams?: { title?: string | null; url?: string | null }[];
   rankingEnabled: boolean;
   status: "WAITING" | "ACTIVE" | "FINISHED";
   paymentRate: string;
@@ -101,6 +104,11 @@ type SponsorForm = {
   linkUrl: string;
 };
 
+type LiveStreamForm = {
+  title: string;
+  url: string;
+};
+
 type Props = {
   leagues: League[];
   sports: Sport[];
@@ -115,6 +123,10 @@ const createEmptySponsor = (): SponsorForm => ({
   name: "",
   imageUrl: "",
   linkUrl: "",
+});
+const createEmptyLiveStream = (): LiveStreamForm => ({
+  title: "",
+  url: "",
 });
 
 const toISODate = (value: string | Date | null | undefined) => {
@@ -216,6 +228,9 @@ export default function TournamentsManager({
     rankingEnabled: true,
     address: "",
     photoUrl: "",
+    liveStreamTitle: "",
+    liveStreamUrl: "",
+    liveStreams: [] as LiveStreamForm[],
     startDate: "",
     endDate: "",
     registrationDeadline: "",
@@ -240,6 +255,7 @@ export default function TournamentsManager({
     Record<number, boolean>
   >({});
   const [uploadingTournamentPhoto, setUploadingTournamentPhoto] = useState(false);
+  const [savingLiveStreams, setSavingLiveStreams] = useState(false);
   const rulesEditorRef = useRef<HTMLDivElement | null>(null);
   const quillRef = useRef<any>(null);
   const lastRulesHtmlRef = useRef<string>("");
@@ -276,6 +292,70 @@ export default function TournamentsManager({
 
     updateSponsorField(index, "imageUrl", data.url as string);
     setMessage("Logo subido");
+  };
+
+  const updateLiveStreamField = (
+    index: number,
+    field: keyof LiveStreamForm,
+    value: string
+  ) => {
+    setForm((prev) => {
+      const liveStreams = [...prev.liveStreams];
+      liveStreams[index] = { ...liveStreams[index], [field]: value };
+      return { ...prev, liveStreams };
+    });
+  };
+
+  const addLiveStream = () => {
+    setForm((prev) => ({
+      ...prev,
+      liveStreams: [...prev.liveStreams, createEmptyLiveStream()],
+    }));
+  };
+
+  const removeLiveStream = (index: number) => {
+    setForm((prev) => ({
+      ...prev,
+      liveStreams: prev.liveStreams.filter((_, idx) => idx !== index),
+    }));
+  };
+
+  const saveLiveStreams = async () => {
+    if (!activeTournamentId) {
+      setError("Primero guarda el torneo para habilitar la transmision");
+      return;
+    }
+    setSavingLiveStreams(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const payload = {
+        liveStreams: form.liveStreams.map((stream) => ({
+          title: stream.title.trim(),
+          url: stream.url.trim(),
+        })),
+      };
+      const res = await fetch(
+        `/api/tournaments/${activeTournamentId}/live-streams`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify(payload),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = data?.detail ? ` (${data.detail})` : "";
+        throw new Error(`${data?.error ?? "No se pudo guardar"}${detail}`);
+      }
+      setMessage("Transmision guardada");
+      await refreshTournaments();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar");
+    } finally {
+      setSavingLiveStreams(false);
+    }
   };
 
   const handleTournamentPhotoUpload = async (file?: File | null) => {
@@ -449,6 +529,9 @@ export default function TournamentsManager({
       rankingEnabled: true,
       address: "",
       photoUrl: "",
+      liveStreamTitle: "",
+      liveStreamUrl: "",
+      liveStreams: [],
       startDate: "",
       endDate: "",
       registrationDeadline: "",
@@ -744,6 +827,26 @@ export default function TournamentsManager({
     setActiveTournamentStatus(tournament.status ?? "WAITING");
     setActivePaymentRate(tournament.paymentRate ?? "0");
     setCurrentStep(nextStep ?? 1);
+    const normalizedStreams = Array.isArray(tournament.liveStreams)
+      ? tournament.liveStreams
+          .filter((entry) => entry && typeof entry === "object")
+          .map((entry) => ({
+            title: typeof entry.title === "string" ? entry.title : "",
+            url: typeof entry.url === "string" ? entry.url : "",
+          }))
+          .filter((entry) => entry.url.trim())
+      : [];
+    const fallbackStreams =
+      normalizedStreams.length === 0 &&
+      (tournament.liveStreamTitle || tournament.liveStreamUrl)
+        ? [
+            {
+              title: tournament.liveStreamTitle ?? "",
+              url: tournament.liveStreamUrl ?? "",
+            },
+          ]
+        : normalizedStreams;
+
     setForm({
       name: tournament.name,
       sportId: fallbackSportId,
@@ -751,6 +854,9 @@ export default function TournamentsManager({
       rankingEnabled: tournament.rankingEnabled ?? true,
       address: tournament.address ?? "",
       photoUrl: tournament.photoUrl ?? "",
+      liveStreamTitle: tournament.liveStreamTitle ?? "",
+      liveStreamUrl: tournament.liveStreamUrl ?? "",
+      liveStreams: fallbackStreams,
       startDate: toISODate(tournament.startDate),
       endDate: toISODate(tournament.endDate),
       registrationDeadline: toISODate(tournament.registrationDeadline),
@@ -926,6 +1032,14 @@ export default function TournamentsManager({
       rankingEnabled: form.rankingEnabled,
       address: form.address || null,
       photoUrl: form.photoUrl || null,
+      liveStreamTitle: form.liveStreamTitle || null,
+      liveStreamUrl: form.liveStreamUrl || null,
+      liveStreams: form.liveStreams
+        .map((stream) => ({
+          title: stream.title.trim(),
+          url: stream.url.trim(),
+        }))
+        .filter((stream) => stream.url),
       startDate: form.startDate,
       endDate: noEndDate ? null : form.endDate || null,
       registrationDeadline: form.registrationDeadline,
@@ -1518,6 +1632,87 @@ export default function TournamentsManager({
                 </p>
               )}
             </div>
+          </div>
+
+          <div className="mt-6 rounded-2xl border border-slate-200/70 bg-slate-50/80 p-5 shadow-[0_12px_32px_-24px_rgba(15,23,42,0.25)]">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-900">Transmision en vivo</h3>
+                <p className="text-sm text-slate-600">
+                  Agrega uno o mas enlaces de streaming con su titulo.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={addLiveStream}
+                  className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-700 shadow-sm transition hover:border-slate-300"
+                >
+                  + Agregar video
+                </button>
+                <button
+                  type="button"
+                  onClick={saveLiveStreams}
+                  disabled={savingLiveStreams}
+                  className="inline-flex items-center justify-center rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {savingLiveStreams ? "Guardando..." : "Guardar transmision"}
+                </button>
+              </div>
+            </div>
+
+            {form.liveStreams.length === 0 ? (
+              <p className="mt-3 text-sm text-slate-500">
+                Aun no hay videos configurados.
+              </p>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {form.liveStreams.map((stream, index) => (
+                  <div
+                    key={`live-stream-${index}`}
+                    className="grid gap-3 rounded-2xl border border-slate-200/70 bg-white/90 p-4 md:grid-cols-[1.2fr_1.8fr_auto]"
+                  >
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold uppercase text-slate-500">
+                        Titulo
+                      </label>
+                      <input
+                        type="text"
+                        value={stream.title}
+                        onChange={(e) =>
+                          updateLiveStreamField(index, "title", e.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                        placeholder="Final - Categoria Open"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-semibold uppercase text-slate-500">
+                        Link del en vivo
+                      </label>
+                      <input
+                        type="url"
+                        value={stream.url}
+                        onChange={(e) =>
+                          updateLiveStreamField(index, "url", e.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                        placeholder="https://..."
+                      />
+                    </div>
+                    <div className="flex items-start justify-end">
+                      <button
+                        type="button"
+                        onClick={() => removeLiveStream(index)}
+                        className="rounded-full border border-red-200 bg-red-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-red-600 transition hover:border-red-300"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="mt-6 rounded-2xl border border-slate-200/70 bg-white/90 p-5 shadow-[0_12px_32px_-24px_rgba(15,23,42,0.25)]">

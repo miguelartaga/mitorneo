@@ -314,6 +314,9 @@ export async function POST(request: Request) {
     registrationDeadline,
     rulesText,
     photoUrl,
+    liveStreamTitle,
+    liveStreamUrl,
+    liveStreams,
     playDays,
     categoryEntries,
     sponsors,
@@ -329,6 +332,9 @@ export async function POST(request: Request) {
     registrationDeadline?: unknown;
     rulesText?: unknown;
     photoUrl?: unknown;
+    liveStreamTitle?: unknown;
+    liveStreamUrl?: unknown;
+    liveStreams?: unknown;
     playDays?: unknown;
     categoryEntries?: unknown;
     sponsors?: unknown;
@@ -501,6 +507,29 @@ export async function POST(request: Request) {
     typeof photoUrl === "string" && photoUrl.trim().length > 0
       ? photoUrl.trim()
       : null;
+  const liveStreamTitleValue =
+    typeof liveStreamTitle === "string" && liveStreamTitle.trim().length > 0
+      ? liveStreamTitle.trim()
+      : null;
+  const liveStreamUrlValue =
+    typeof liveStreamUrl === "string" && liveStreamUrl.trim().length > 0
+      ? liveStreamUrl.trim()
+      : null;
+  const liveStreamsValue = Array.isArray(liveStreams)
+    ? liveStreams
+        .filter((entry) => entry && typeof entry === "object")
+        .map((entry) => ({
+          title:
+            typeof (entry as { title?: unknown }).title === "string"
+              ? (entry as { title: string }).title.trim()
+              : "",
+          url:
+            typeof (entry as { url?: unknown }).url === "string"
+              ? (entry as { url: string }).url.trim()
+              : "",
+        }))
+        .filter((entry) => entry.url)
+    : null;
 
   const settings =
     (await prisma.globalSetting.findUnique({
@@ -524,6 +553,9 @@ export async function POST(request: Request) {
         registrationDeadline: registration,
         rulesText: rulesValue,
         photoUrl: photoUrlValue,
+        liveStreamTitle: liveStreamTitleValue,
+        liveStreamUrl: liveStreamUrlValue,
+        liveStreams: liveStreamsValue,
         playDays: normalizedDays,
         ownerId: session.user.id,
         clubs: {

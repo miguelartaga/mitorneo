@@ -70,6 +70,7 @@ export type Match = {
         isLive?: boolean;
         pointScore?: { A?: string | null; B?: string | null };
         activeSet?: number | null;
+        bonusByPlayer?: Record<string, { double?: number; triple?: number }>;
     } | null;
     winnerSide?: "A" | "B" | null;
     outcomeType?: string | null;
@@ -107,6 +108,9 @@ export type TournamentPublicData = {
     endDate?: string | null;
     registrationDeadline?: string | null;
     rulesText?: string | null;
+    liveStreamTitle?: string | null;
+    liveStreamUrl?: string | null;
+    liveStreams?: { title?: string | null; url?: string | null }[];
     rankingEnabled?: boolean;
     playDays: string[];
     schedulePublished?: boolean;

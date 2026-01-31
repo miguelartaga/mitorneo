@@ -56,9 +56,9 @@ export async function GET(
         select: {
           id: true,
           teamName: true,
-          player: { select: { firstName: true, lastName: true } },
-          partner: { select: { firstName: true, lastName: true } },
-          partnerTwo: { select: { firstName: true, lastName: true } },
+          player: { select: { id: true, firstName: true, lastName: true } },
+          partner: { select: { id: true, firstName: true, lastName: true } },
+          partnerTwo: { select: { id: true, firstName: true, lastName: true } },
         },
       },
       teamBId: true,
@@ -66,9 +66,9 @@ export async function GET(
         select: {
           id: true,
           teamName: true,
-          player: { select: { firstName: true, lastName: true } },
-          partner: { select: { firstName: true, lastName: true } },
-          partnerTwo: { select: { firstName: true, lastName: true } },
+          player: { select: { id: true, firstName: true, lastName: true } },
+          partner: { select: { id: true, firstName: true, lastName: true } },
+          partnerTwo: { select: { id: true, firstName: true, lastName: true } },
         },
       },
       club: {

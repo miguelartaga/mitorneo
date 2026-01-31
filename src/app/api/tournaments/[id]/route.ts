@@ -306,6 +306,9 @@ export async function PATCH(
     registrationDeadline,
     rulesText,
     photoUrl,
+    liveStreamTitle,
+    liveStreamUrl,
+    liveStreams,
     playDays,
     categoryEntries,
     sponsors,
@@ -321,6 +324,9 @@ export async function PATCH(
     registrationDeadline?: unknown;
     rulesText?: unknown;
     photoUrl?: unknown;
+    liveStreamTitle?: unknown;
+    liveStreamUrl?: unknown;
+    liveStreams?: unknown;
     playDays?: unknown;
     categoryEntries?: unknown;
     sponsors?: unknown;
@@ -512,6 +518,29 @@ export async function PATCH(
     typeof photoUrl === "string" && photoUrl.trim().length > 0
       ? photoUrl.trim()
       : null;
+  const liveStreamTitleValue =
+    typeof liveStreamTitle === "string" && liveStreamTitle.trim().length > 0
+      ? liveStreamTitle.trim()
+      : null;
+  const liveStreamUrlValue =
+    typeof liveStreamUrl === "string" && liveStreamUrl.trim().length > 0
+      ? liveStreamUrl.trim()
+      : null;
+  const liveStreamsValue = Array.isArray(liveStreams)
+    ? liveStreams
+        .filter((entry) => entry && typeof entry === "object")
+        .map((entry) => ({
+          title:
+            typeof (entry as { title?: unknown }).title === "string"
+              ? (entry as { title: string }).title.trim()
+              : "",
+          url:
+            typeof (entry as { url?: unknown }).url === "string"
+              ? (entry as { url: string }).url.trim()
+              : "",
+        }))
+        .filter((entry) => entry.url)
+    : null;
 
   try {
     const updated = await prisma.tournament.update({
@@ -527,6 +556,9 @@ export async function PATCH(
         registrationDeadline: registration,
         rulesText: rulesValue,
         photoUrl: photoUrlValue,
+        liveStreamTitle: liveStreamTitleValue,
+        liveStreamUrl: liveStreamUrlValue,
+        liveStreams: liveStreamsValue,
         playDays: normalizedDays,
         clubs: {
           deleteMany: {},
