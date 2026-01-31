@@ -1,9 +1,9 @@
 import { getServerSession } from "@/lib/auth";
 import { NextResponse } from "next/server";
 import { promises as fs } from "fs";
-import path from "path";
 import crypto from "crypto";
 import { processImageUpload } from "@/lib/image-upload";
+import { getUploadsDir } from "@/lib/uploads";
 
 const MAX_SIZE_BYTES = 2 * 1024 * 1024;
 const MAX_INPUT_BYTES = 10 * 1024 * 1024;
@@ -48,7 +48,7 @@ export async function POST(request: Request) {
   }
 
   const filename = `${crypto.randomUUID()}${processed.ext}`;
-  const uploadsDir = path.join(process.cwd(), "public", "uploads");
+  const uploadsDir = getUploadsDir();
   const filePath = path.join(uploadsDir, filename);
 
   await fs.mkdir(uploadsDir, { recursive: true });

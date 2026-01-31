@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
+import { getUploadsDir } from "@/lib/uploads";
 import { type NextRequest } from "next/server";
 
 export async function GET(
@@ -18,7 +19,7 @@ export async function GET(
     // Define the uploads directory - MUST match where files are saved
     // In typical Next.js standalone w/ Docker, process.cwd() is /app
     // If user maps volume to /app/public/uploads, this works.
-    const filePath = path.join(process.cwd(), "public", "uploads", cleanPath);
+    const filePath = path.join(getUploadsDir(), cleanPath);
 
     try {
         // Check if file exists
