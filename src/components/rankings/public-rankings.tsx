@@ -281,9 +281,9 @@ export default function PublicRankings({
             {entries.map((entry) => (
               <div
                 key={entry.id}
-                className="relative flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 sm:gap-4 sm:p-4"
+                className="relative flex items-center gap-2.5 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60 p-2.5 sm:gap-4 sm:p-4"
               >
-                <div className="relative h-12 w-12 flex-shrink-0 sm:h-16 sm:w-16">
+                <div className="relative h-11 w-11 flex-shrink-0 sm:h-16 sm:w-16">
                   <div className="h-full w-full overflow-hidden rounded-2xl bg-white shadow-sm">
                     <PlayerAvatar
                       player={entry.player}
@@ -291,7 +291,7 @@ export default function PublicRankings({
                       fallbackClassName="flex h-full w-full items-center justify-center bg-slate-100 text-slate-400"
                     />
                   </div>
-                  <div className="absolute -left-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-[10px] font-bold text-white shadow-sm ring-2 ring-white sm:-left-3 sm:-top-3 sm:h-7 sm:w-7 sm:text-xs">
+                  <div className="absolute -left-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-indigo-600 text-[9px] font-bold text-white ring-2 ring-white sm:-left-3 sm:-top-3 sm:h-7 sm:w-7 sm:text-xs">
                     #{entry.rank}
                   </div>
                 </div>
@@ -300,7 +300,7 @@ export default function PublicRankings({
                   <div className="flex items-center justify-between gap-1">
                     <Link
                       href={`/players/${entry.player.id}`}
-                      className="block truncate text-base font-bold text-slate-900 hover:text-indigo-600 sm:text-lg"
+                      className="block truncate text-[15px] font-bold text-slate-900 hover:text-indigo-600 sm:text-lg"
                     >
                       {entry.player.firstName} {entry.player.lastName}
                     </Link>
@@ -308,20 +308,22 @@ export default function PublicRankings({
                   <p className="truncate text-xs text-slate-500 sm:text-sm">
                     {entry.player.city || "Ciudad"} · {entry.player.country || "Pais"}
                   </p>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:mt-2">
-                    <span className="truncate max-w-full">{entry.category.abbreviation}</span>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500 sm:mt-2 sm:gap-x-2 sm:gap-y-1 sm:text-[10px]">
+                    <span className="truncate max-w-[80px] sm:max-w-none">{entry.category.abbreviation}</span>
                     <span>·</span>
-                    <span className="truncate max-w-full">{entry.league.name}</span>
+                    <span className="truncate max-w-[120px] sm:max-w-none">{entry.league.name}</span>
                     <span>·</span>
-                    <span className="truncate max-w-full">{entry.season.name}</span>
+                    <span className="truncate max-w-[60px] sm:max-w-none">{entry.season.name}</span>
                   </div>
                 </div>
 
-                <div className="flex-shrink-0 text-right">
-                  <p className="text-[10px] uppercase text-slate-400 sm:text-xs">Puntos</p>
-                  <p className="text-lg font-black text-slate-900 sm:text-xl">
-                    {entry.points}
-                  </p>
+                <div className="flex flex-col items-center justify-center border-l border-slate-200 pl-2.5 sm:pl-4">
+                  <span className="text-[8px] font-bold uppercase tracking-wider text-slate-400 sm:text-[10px]">
+                    Puntos
+                  </span>
+                  <span className="whitespace-nowrap text-lg font-black text-indigo-600 sm:text-2xl">
+                    {new Intl.NumberFormat("es-BO").format(entry.points)}
+                  </span>
                 </div>
               </div>
             ))}
