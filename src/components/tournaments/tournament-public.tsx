@@ -949,18 +949,36 @@ export default function TournamentPublic({
     return formatPlayoffRoundLabel(bracketSize, normalizedRound);
   };
 
-  const tournamentPhoto = useMemo(() => {
-    if (tournament.photoUrl) return tournament.photoUrl;
-    if (tournament.league?.photoUrl) return tournament.league.photoUrl;
+  // Build detailed fallback chain for the main tournament photo
+  const candidatePhotos = useMemo(() => {
+    const candidates: string[] = [];
+    // 1. Explicit tournament photo
+    if (tournament.photoUrl) candidates.push(tournament.photoUrl);
+    // 2. League photo
+    if (tournament.league?.photoUrl) candidates.push(tournament.league.photoUrl);
+    // 3. Sport generic photo
     const sportFallback = pickSportFallbackPhoto(tournament.sport?.name);
-    if (sportFallback) return sportFallback;
-    return pickFallbackTournamentPhoto(tournament.id);
+    if (sportFallback) candidates.push(sportFallback);
+    // 4. Generic abstract fallback
+    candidates.push(pickFallbackTournamentPhoto(tournament.id));
+
+    return candidates;
   }, [
     tournament.id,
-    tournament.league?.photoUrl,
     tournament.photoUrl,
+    tournament.league?.photoUrl,
     tournament.sport?.name,
   ]);
+
+  const [photoIndex, setPhotoIndex] = useState(0);
+
+  // Reset index if tournament changes significantly (though usually ID change remounts component)
+  useEffect(() => {
+    setPhotoIndex(0);
+  }, [tournament.id, tournament.photoUrl]);
+
+  const currentPhotoUrl = candidatePhotos[photoIndex] ?? candidatePhotos[candidatePhotos.length - 1];
+
   const showLeagueInfo = Boolean(tournament.rankingEnabled && tournament.league);
 
   return (
@@ -970,9 +988,14 @@ export default function TournamentPublic({
         <div className="mx-auto w-full max-w-6xl px-6 pt-6 sm:pt-12">
           <div className="relative h-[300px] w-full overflow-hidden rounded-[2rem] sm:h-[400px] lg:h-[500px]">
             <img
-              src={tournamentPhoto}
+              src={currentPhotoUrl}
               alt={`Imagen del torneo ${tournament.name}`}
               className="h-full w-full object-cover"
+              onError={() => {
+                if (photoIndex < candidatePhotos.length - 1) {
+                  setPhotoIndex((prev) => prev + 1);
+                }
+              }}
             />
             <div className="absolute inset-0 bg-gradient-to-t from-[var(--background)] from-10% via-[var(--background)]/60 to-transparent" />
           </div>
