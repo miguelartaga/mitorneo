@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { BracketCanvas } from "@/components/tournaments/bracket-canvas";
 import TournamentPublicFixture from "@/components/tournaments/tournament-public-fixture";
 import TournamentPublicParticipants from "@/components/tournaments/tournament-public-participants";
+import TournamentPublicPrizes from "@/components/tournaments/tournament-public-prizes";
+import TournamentPublicContact from "@/components/tournaments/tournament-public-contact";
 import {
   computeTournamentStandingsByCategory,
   type TournamentRankingData,
@@ -321,22 +323,6 @@ const formatPlayoffRoundLabel = (bracketSize: number, roundNumber: number) => {
   if (roundSize === 32) return "Ronda de 32";
   if (roundSize === 64) return "Ronda de 64";
   return `Ronda de ${roundSize}`;
-};
-
-const describePrizePlace = (placeFrom: number, placeTo?: number | null) => {
-  const toValue = placeTo ?? placeFrom;
-  if (placeFrom === toValue) {
-    if (placeFrom === 1) return "1er lugar";
-    if (placeFrom === 2) return "2do lugar";
-    if (placeFrom === 3) return "3er lugar";
-    if (placeFrom === 4) return "4to lugar";
-    if (placeFrom === 5) return "5to lugar";
-    return `Lugar ${placeFrom}`;
-  }
-  if (placeFrom === 3 && toValue === 4) return "Semifinal";
-  if (placeFrom === 5 && toValue === 8) return "Cuartos de final";
-  if (placeFrom === 1 && toValue === 2) return "Final";
-  return `Lugar ${placeFrom} a ${toValue}`;
 };
 
 const playerLabel = (player?: Player | null) =>
@@ -965,17 +951,7 @@ export default function TournamentPublic({
     [matches]
   );
 
-  const prizesByCategory = useMemo(() => {
-    const map = new Map<string, { category: Category | null; prizes: Prize[] }>();
-    tournament.prizes.forEach((prize) => {
-      const category = prize.category ?? null;
-      const key = prize.categoryId;
-      const entry = map.get(key) ?? { category, prizes: [] };
-      entry.prizes.push(prize);
-      map.set(key, entry);
-    });
-    return Array.from(map.values());
-  }, [tournament.prizes]);
+
 
   const toggleTeamExpanded = (key: string) => {
     setExpandedTeams((prev) => {
@@ -1024,107 +1000,96 @@ export default function TournamentPublic({
 
   return (
     <main className="min-h-screen w-full max-w-[100vw] overflow-x-hidden bg-[var(--background)] text-[var(--foreground)]">
-      <div className="relative overflow-hidden border-b border-[var(--border)] bg-[radial-gradient(1200px_circle_at_10%_20%,rgba(59,130,246,0.25),transparent_55%),radial-gradient(900px_circle_at_90%_0%,rgba(14,165,233,0.25),transparent_50%)]">
-        <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-12">
-          <div className="relative h-52 w-full overflow-hidden rounded-3xl border border-[var(--border)] bg-[var(--surface)]">
+      <div className="relative border-b border-[var(--border)] bg-[var(--background)]">
+        {/* Constrained Hero Image */}
+        <div className="mx-auto w-full max-w-6xl px-6 pt-6 sm:pt-12">
+          <div className="relative h-[300px] w-full overflow-hidden rounded-[2rem] sm:h-[400px] lg:h-[500px]">
             <img
               src={tournamentPhoto}
               alt={`Imagen del torneo ${tournament.name}`}
               className="h-full w-full object-cover"
             />
-            <div className="absolute inset-0 bg-gradient-to-t from-slate-950/60 via-transparent to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-[var(--background)] from-10% via-[var(--background)]/60 to-transparent" />
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-cyan-300/80">
+        </div>
+
+        {/* Content Container - Overlapping the Image */}
+        <div className="relative mx-auto -mt-32 w-full max-w-6xl px-8 pb-12 sm:-mt-40 sm:px-12 lg:-mt-48 lg:px-16">
+          <div className="flex flex-col gap-8">
+            {/* Top: Title & Description */}
+            <div className="w-full">
+              <p className="inline-flex items-center rounded-full bg-blue-600/90 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.2em] text-white backdrop-blur-sm shadow-sm ring-1 ring-white/20">
                 Torneo
               </p>
-              <h1
-                className="mt-3 text-4xl font-semibold text-slate-900"
-                style={{ fontFamily: "'Merriweather', serif" }}
-              >
+              <h1 className="mt-4 w-full text-4xl font-black tracking-tight text-[var(--foreground)] drop-shadow-sm sm:text-6xl md:text-7xl">
                 {tournament.name}
               </h1>
-              <p className="mt-3 max-w-2xl text-sm text-slate-600">
+              <p className="mt-4 max-w-2xl text-base font-medium text-[var(--foreground)]/80 drop-shadow-sm sm:text-lg">
                 {tournament.description ||
                   "Informacion oficial del torneo y detalles para los jugadores."}
               </p>
             </div>
-            {showLeagueInfo && (
-              <div className="flex items-center gap-3 rounded-2xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3 text-xs text-slate-600">
-                <div className="h-16 w-24 overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-2)]">
-                  {tournament.league?.photoUrl ? (
-                    <img
-                      src={tournament.league.photoUrl}
-                      alt={tournament.league.name}
-                      className="h-full w-full object-contain p-1"
-                    />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-400">
-                      Sin foto
-                    </div>
-                  )}
-                </div>
-                <div>
-                  <p className="font-semibold text-slate-900">
-                    {tournament.league?.name ?? "Sin liga"}
-                  </p>
-                  <p className="mt-1 text-slate-500">
-                    {tournament.sport?.name ?? "Sin deporte"}
-                  </p>
-                  <p className="mt-1 text-slate-500">
-                    Inicio: {formatDateShort(tournament.startDate)}
-                  </p>
-                </div>
-              </div>
-            )}
-          </div>
 
-          {tournament.sponsors.length > 0 && (
-            <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.3em] text-slate-400">
-                    Auspiciadores
-                  </p>
-                  <p className="mt-2 text-sm text-slate-600">
-                    Gracias a quienes apoyan el torneo
-                  </p>
+            {/* Bottom: League Info & Sponsors */}
+            <div className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+              {showLeagueInfo && (
+                <div className="flex items-center gap-4 lg:flex-row-reverse">
+                  <div className="h-16 w-16 overflow-hidden rounded-2xl border-2 border-white bg-white shadow-md dark:border-slate-800 dark:bg-slate-800">
+                    {tournament.league?.photoUrl ? (
+                      <img
+                        src={tournament.league.photoUrl}
+                        alt={tournament.league.name}
+                        className="h-full w-full object-contain p-1"
+                      />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-[10px] text-slate-400">
+                        Sin foto
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Organizado por
+                    </p>
+                    <p className="text-sm font-bold text-[var(--foreground)]">
+                      {tournament.league?.name ?? "Sin liga"}
+                    </p>
+                    <div className="flex items-center gap-2 text-xs font-medium text-slate-500 lg:justify-end">
+                      <span>{tournament.sport?.name}</span>
+                      <span>•</span>
+                      <span>{formatDateShort(tournament.startDate)}</span>
+                    </div>
+                  </div>
                 </div>
-                <span className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
-                  {tournament.sponsors.length} logos
-                </span>
-              </div>
-              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-                {tournament.sponsors.map((sponsor, index) => {
-                  const content = (
-                    <div className="group flex h-20 items-center justify-center rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] px-4 py-3 transition hover:-translate-y-0.5 hover:border-cyan-400/40 hover:bg-white/60">
+              )}
+
+              {tournament.sponsors.length > 0 && (
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 lg:justify-end">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400 dark:text-slate-500">
+                    Auspiciadores:
+                  </span>
+                  {tournament.sponsors.map((sponsor, index) => (
+                    <a
+                      key={`${sponsor.imageUrl}-${index}`}
+                      href={sponsor.linkUrl ?? undefined}
+                      target={sponsor.linkUrl ? "_blank" : undefined}
+                      rel="noreferrer"
+                      className={`block ${sponsor.linkUrl
+                        ? "cursor-pointer transition-transform hover:scale-105"
+                        : "cursor-default"
+                        }`}
+                    >
                       <img
                         src={sponsor.imageUrl}
-                        alt={sponsor.name ?? `Auspiciador ${index + 1}`}
-                        className="max-h-10 w-auto object-contain transition group-hover:scale-105"
+                        alt={sponsor.name ?? "Sponsor"}
+                        className="h-8 w-auto max-w-[120px] object-contain sm:h-10 sm:max-w-[150px]"
                       />
-                    </div>
-                  );
-                  if (sponsor.linkUrl) {
-                    return (
-                      <a
-                        key={`${sponsor.imageUrl}-${index}`}
-                        href={sponsor.linkUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        {content}
-                      </a>
-                    );
-                  }
-                  return (
-                    <div key={`${sponsor.imageUrl}-${index}`}>{content}</div>
-                  );
-                })}
-              </div>
+                    </a>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
+          </div>
         </div>
       </div>
 
@@ -1857,92 +1822,16 @@ export default function TournamentPublic({
             </div>
           </section>
         )}
-        {
-          tab === "prizes" && (
-            <section className="mt-8 space-y-6">
-              {tournament.prizes.length === 0 ? (
-                <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-slate-500">
-                  Premios por definir.
-                </div>
-              ) : (
-                prizesByCategory.map((entry, index) => (
-                  <div
-                    key={`prize-category-${entry.category?.id ?? index}`}
-                    className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-xs uppercase tracking-[0.25em] text-cyan-200/80">
-                          Categoria
-                        </p>
-                        <h3 className="mt-2 text-xl font-semibold text-slate-900">
-                          {entry.category?.name ?? "Categoria"}
-                        </h3>
-                        {entry.category?.abbreviation && (
-                          <p className="mt-1 text-xs text-slate-500">
-                            {entry.category.abbreviation}
-                          </p>
-                        )}
-                      </div>
-                      <span className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-4 py-2 text-xs font-semibold text-slate-600">
-                        {entry.prizes.length} premio(s)
-                      </span>
-                    </div>
-
-                    <div className="mt-4 grid gap-4 md:grid-cols-2">
-                      {entry.prizes.map((prize) => (
-                        <div
-                          key={prize.id}
-                          className="rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] p-4"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-semibold text-slate-900">
-                                {describePrizePlace(prize.placeFrom, prize.placeTo)}
-                              </p>
-                              <p className="mt-1 text-xs text-slate-500">
-                                Desde {prize.placeFrom} hasta{" "}
-                                {prize.placeTo ?? prize.placeFrom}
-                              </p>
-                            </div>
-                            <div className="rounded-full border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1 text-[11px] font-semibold text-slate-600">
-                              {prize.amount ? `Bs ${prize.amount}` : "Premio"}
-                            </div>
-                          </div>
-                          <p className="mt-3 text-xs text-slate-500">
-                            {prize.prizeText ?? "-"}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              )}
-            </section>
-          )
-        }
+        {tab === "prizes" && <TournamentPublicPrizes prizes={tournament.prizes} />}
 
         {
           tab === "contact" && (
-            <section className="mt-8 grid gap-6 lg:grid-cols-[1.2fr_1fr]">
-              <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
-                <h2 className="text-lg font-semibold text-slate-900">Contacto</h2>
-                <div className="mt-4 space-y-2 text-sm text-slate-500">
-                  <p>Organiza: {tournament.league?.name ?? "N/D"}</p>
-                  <p>
-                    Responsable: {tournament.owner?.name ?? "Sin nombre"}
-                  </p>
-                  <p>Correo: {tournament.owner?.email ?? "Sin correo"}</p>
-                  <p>Direccion: {tournament.address ?? "Sin direccion"}</p>
-                </div>
-              </div>
-              <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6">
-                <h2 className="text-lg font-semibold text-slate-900">Ubicacion</h2>
-                <p className="mt-4 text-sm text-slate-500">
-                  Consulta las sedes y horarios en la pestaña de tiempos.
-                </p>
-              </div>
-            </section>
+            <TournamentPublicContact
+              leagueName={tournament.league?.name}
+              ownerName={tournament.owner?.name}
+              ownerEmail={tournament.owner?.email}
+              address={tournament.address}
+            />
           )
         }
       </div>

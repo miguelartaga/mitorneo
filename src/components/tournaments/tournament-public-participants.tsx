@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { Search } from "lucide-react";
 import { type ParticipantRow } from "@/types/tournament-public";
@@ -15,18 +16,56 @@ export default function TournamentPublicParticipants({
     setParticipantQuery,
     filteredParticipantRows,
 }: TournamentPublicParticipantsProps) {
-    const sortedRows = [...filteredParticipantRows].sort((a, b) =>
-        a.player.lastName.localeCompare(b.player.lastName)
-    );
+    // 1. Consolidate rows by player ID
+    const consolidatedParticipants = useMemo(() => {
+        const map = new Map<
+            string,
+            {
+                player: ParticipantRow["player"];
+                location: string;
+                entries: { category: ParticipantRow["category"]; teamName: string | null }[];
+            }
+        >();
 
-    const groupedParticipants = sortedRows.reduce((acc, row) => {
-        const letter = row.player.lastName.charAt(0).toUpperCase();
-        if (!acc[letter]) {
-            acc[letter] = [];
-        }
-        acc[letter].push(row);
-        return acc;
-    }, {} as Record<string, ParticipantRow[]>);
+        filteredParticipantRows.forEach((row) => {
+            const existing = map.get(row.player.id);
+            if (existing) {
+                // Add new category/team entry if not already present (though unlikely to be duplicate in this context)
+                existing.entries.push({
+                    category: row.category,
+                    teamName: row.teamName,
+                });
+            } else {
+                map.set(row.player.id, {
+                    player: row.player,
+                    location: row.location,
+                    entries: [{ category: row.category, teamName: row.teamName }],
+                });
+            }
+        });
+
+        // Convert back to array
+        return Array.from(map.values());
+    }, [filteredParticipantRows]);
+
+    // 2. Sort by Last Name
+    const sortedParticipants = useMemo(() => {
+        return [...consolidatedParticipants].sort((a, b) =>
+            a.player.lastName.localeCompare(b.player.lastName)
+        );
+    }, [consolidatedParticipants]);
+
+    // 3. Group by Initial Letter
+    const groupedParticipants = useMemo(() => {
+        return sortedParticipants.reduce((acc, item) => {
+            const letter = item.player.lastName.charAt(0).toUpperCase();
+            if (!acc[letter]) {
+                acc[letter] = [];
+            }
+            acc[letter].push(item);
+            return acc;
+        }, {} as Record<string, typeof sortedParticipants>);
+    }, [sortedParticipants]);
 
     const sortedLetters = Object.keys(groupedParticipants).sort();
 
@@ -39,7 +78,7 @@ export default function TournamentPublicParticipants({
                             Lista de Inscritos
                         </h2>
                         <p className="text-sm text-slate-500">
-                            {sortedRows.length} jugadores encontrados
+                            {sortedParticipants.length} jugadores encontrados
                         </p>
                     </div>
                     <div className="w-full sm:w-72">
@@ -58,7 +97,7 @@ export default function TournamentPublicParticipants({
                     </div>
                 </div>
 
-                {sortedRows.length === 0 ? (
+                {sortedParticipants.length === 0 ? (
                     <p className="mt-4 text-center text-sm text-slate-500">
                         No se encontraron participantes.
                     </p>
@@ -73,44 +112,50 @@ export default function TournamentPublicParticipants({
                                     <div className="h-px flex-1 bg-[var(--border)]" />
                                 </div>
                                 <div className="grid gap-3 sm:grid-cols-2">
-                                    {groupedParticipants[letter].map((row) => (
+                                    {groupedParticipants[letter].map((item) => (
                                         <Link
-                                            key={row.id}
-                                            href={`/players/${row.player.id}`}
-                                            className="flex items-center gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] p-4 shadow-sm transition-shadow hover:shadow-md"
+                                            key={item.player.id}
+                                            href={`/players/${item.player.id}`}
+                                            className="flex items-start gap-4 rounded-2xl border border-[var(--border)] bg-[var(--surface-2)] p-4 shadow-sm transition-shadow hover:shadow-md"
                                         >
                                             <div className="relative h-14 w-14 flex-shrink-0">
                                                 <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-full border border-[var(--border)] bg-[var(--background)] text-lg font-bold text-slate-400">
-                                                    {row.player.photoUrl ? (
+                                                    {item.player.photoUrl ? (
                                                         <img
-                                                            src={row.player.photoUrl}
-                                                            alt={row.player.firstName}
+                                                            src={item.player.photoUrl}
+                                                            alt={item.player.firstName}
                                                             className="h-full w-full object-cover"
                                                         />
                                                     ) : (
                                                         <div className="flex h-full w-full items-center justify-center bg-indigo-100 text-indigo-600 font-bold uppercase ring-2 ring-white dark:ring-slate-800">
-                                                            {row.player.lastName[0] || row.player.firstName[0]}
+                                                            {item.player.lastName[0] || item.player.firstName[0]}
                                                         </div>
                                                     )}
                                                 </div>
                                             </div>
-                                            <div className="min-w-0 flex-1">
-                                                <p className="truncate font-semibold text-slate-900">
-                                                    {row.player.lastName} {row.player.firstName}
+                                            <div className="min-w-0 flex-1 pt-1">
+                                                <p className="font-semibold text-slate-900 leading-snug">
+                                                    {item.player.lastName} {item.player.firstName}
                                                 </p>
-                                                <div className="mt-1 flex flex-wrap gap-x-2 text-xs">
-                                                    <span className="text-blue-600 dark:text-cyan-200 font-medium">
-                                                        {row.category.name} ({row.category.abbreviation})
-                                                    </span>
+
+                                                <div className="mt-2 flex flex-col gap-1.5">
+                                                    {item.entries.map((entry, idx) => (
+                                                        <div key={`${entry.category.id}-${idx}`} className="flex flex-col">
+                                                            <span className="text-xs font-medium text-blue-600 dark:text-cyan-200">
+                                                                {entry.category.name} ({entry.category.abbreviation})
+                                                            </span>
+                                                            {entry.teamName && (
+                                                                <span className="text-xs text-slate-400">
+                                                                    Equipo: {entry.teamName}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    ))}
                                                 </div>
-                                                <p className="mt-0.5 truncate text-xs text-slate-500">
-                                                    {row.location || "Sin ubicacion"}
+
+                                                <p className="mt-2 text-xs text-slate-500">
+                                                    {item.location || "Sin ubicación"}
                                                 </p>
-                                                {row.teamName && (
-                                                    <p className="mt-0.5 truncate text-xs text-slate-400">
-                                                        Equipo: {row.teamName}
-                                                    </p>
-                                                )}
                                             </div>
                                         </Link>
                                     ))}
