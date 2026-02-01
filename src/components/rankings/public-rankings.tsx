@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import PlayerAvatar from "@/components/player-avatar";
 
 type Sport = {
   id: string;
@@ -164,7 +165,7 @@ export default function PublicRankings({
   }, [sportId, leagueId, seasonId, categoryId, tournamentId, query]);
 
   return (
-    <section className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+    <section className="rounded-[28px] border border-slate-200 bg-white p-3 shadow-sm sm:p-6">
       <div className="flex flex-wrap items-center gap-2">
         {leagues.map((league) => (
           <button
@@ -175,11 +176,10 @@ export default function PublicRankings({
               setSeasonId("");
               setTournamentId("");
             }}
-            className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] transition ${
-              leagueId === league.id
-                ? "bg-slate-900 text-white"
-                : "border border-slate-200 bg-white text-slate-600 hover:border-slate-300"
-            }`}
+            className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] transition ${leagueId === league.id
+              ? "bg-slate-900 text-white"
+              : "border border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+              }`}
           >
             {league.name}
           </button>
@@ -281,66 +281,45 @@ export default function PublicRankings({
             {entries.map((entry) => (
               <div
                 key={entry.id}
-                className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50/60 p-4"
+                className="relative flex items-center gap-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-3 sm:gap-4 sm:p-4"
               >
-                <div className="relative h-16 w-16 overflow-hidden rounded-2xl bg-white shadow-sm">
-                  {entry.player.photoUrl ? (
-                    <img
-                      src={entry.player.photoUrl}
-                      alt={`${entry.player.firstName} ${entry.player.lastName}`}
+                <div className="relative h-12 w-12 flex-shrink-0 sm:h-16 sm:w-16">
+                  <div className="h-full w-full overflow-hidden rounded-2xl bg-white shadow-sm">
+                    <PlayerAvatar
+                      player={entry.player}
                       className="h-full w-full object-cover"
+                      fallbackClassName="flex h-full w-full items-center justify-center bg-slate-100 text-slate-400"
                     />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center bg-slate-100 text-slate-400">
-                      <svg
-                        aria-hidden="true"
-                        viewBox="0 0 64 64"
-                        className="h-10 w-10"
-                        fill="none"
-                      >
-                        <circle
-                          cx="32"
-                          cy="24"
-                          r="12"
-                          stroke="currentColor"
-                          strokeWidth="3"
-                        />
-                        <path
-                          d="M12 56c2-10 12-18 20-18s18 8 20 18"
-                          stroke="currentColor"
-                          strokeWidth="3"
-                          strokeLinecap="round"
-                        />
-                      </svg>
-                    </div>
-                  )}
+                  </div>
+                  <div className="absolute -left-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-indigo-600 text-[10px] font-bold text-white shadow-sm ring-2 ring-white sm:-left-3 sm:-top-3 sm:h-7 sm:w-7 sm:text-xs">
+                    #{entry.rank}
+                  </div>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center justify-between">
+
+                <div className="min-w-0 flex-1 overflow-hidden">
+                  <div className="flex items-center justify-between gap-1">
                     <Link
                       href={`/players/${entry.player.id}`}
-                      className="truncate text-base font-semibold text-slate-900 hover:text-indigo-600"
+                      className="block truncate text-base font-bold text-slate-900 hover:text-indigo-600 sm:text-lg"
                     >
                       {entry.player.firstName} {entry.player.lastName}
                     </Link>
-                    <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-indigo-600">
-                      #{entry.rank}
-                    </span>
                   </div>
-                  <p className="text-xs text-slate-500">
+                  <p className="truncate text-xs text-slate-500 sm:text-sm">
                     {entry.player.city || "Ciudad"} · {entry.player.country || "Pais"}
                   </p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">
-                    <span>{entry.category.abbreviation}</span>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:mt-2">
+                    <span className="truncate max-w-full">{entry.category.abbreviation}</span>
                     <span>·</span>
-                    <span>{entry.league.name}</span>
+                    <span className="truncate max-w-full">{entry.league.name}</span>
                     <span>·</span>
-                    <span>{entry.season.name}</span>
+                    <span className="truncate max-w-full">{entry.season.name}</span>
                   </div>
                 </div>
-                <div className="text-right">
-                  <p className="text-xs text-slate-500">Puntos</p>
-                  <p className="text-lg font-semibold text-slate-900">
+
+                <div className="flex-shrink-0 text-right">
+                  <p className="text-[10px] uppercase text-slate-400 sm:text-xs">Puntos</p>
+                  <p className="text-lg font-black text-slate-900 sm:text-xl">
                     {entry.points}
                   </p>
                 </div>

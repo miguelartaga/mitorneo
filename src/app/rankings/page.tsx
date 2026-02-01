@@ -26,7 +26,7 @@ export default async function RankingsPage() {
   ]);
 
   return (
-    <main className="min-h-screen bg-slate-50 px-6 py-12">
+    <main className="min-h-screen bg-slate-50 px-2 py-6 sm:px-6 sm:py-12">
       <div className="mx-auto w-full max-w-6xl">
         <div className="mb-8">
           <p className="text-xs font-semibold uppercase tracking-[0.25em] text-indigo-500/90">
