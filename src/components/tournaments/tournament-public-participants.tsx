@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import Link from "next/link";
 import { Search } from "lucide-react";
 import { type ParticipantRow } from "@/types/tournament-public";
+import PlayerAvatar from "@/components/player-avatar";
 
 type TournamentPublicParticipantsProps = {
     participantQuery: string;
@@ -120,17 +121,11 @@ export default function TournamentPublicParticipants({
                                         >
                                             <div className="relative h-14 w-14 flex-shrink-0">
                                                 <div className="flex h-full w-full items-center justify-center overflow-hidden rounded-full border border-[var(--border)] bg-[var(--background)] text-lg font-bold text-slate-400">
-                                                    {item.player.photoUrl ? (
-                                                        <img
-                                                            src={item.player.photoUrl}
-                                                            alt={item.player.firstName}
-                                                            className="h-full w-full object-cover"
-                                                        />
-                                                    ) : (
-                                                        <div className="flex h-full w-full items-center justify-center bg-indigo-100 text-indigo-600 font-bold uppercase ring-2 ring-white dark:ring-slate-800">
-                                                            {item.player.lastName[0] || item.player.firstName[0]}
-                                                        </div>
-                                                    )}
+                                                    <PlayerAvatar
+                                                        player={item.player}
+                                                        className="h-full w-full object-cover"
+                                                        fallbackClassName="flex h-full w-full items-center justify-center bg-indigo-100 text-indigo-600 font-bold uppercase ring-2 ring-white dark:ring-slate-800"
+                                                    />
                                                 </div>
                                             </div>
                                             <div className="min-w-0 flex-1 pt-1">

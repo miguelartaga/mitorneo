@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { BracketCanvas } from "@/components/tournaments/bracket-canvas";
 import TournamentPublicFixture from "@/components/tournaments/tournament-public-fixture";
 import TournamentPublicParticipants from "@/components/tournaments/tournament-public-participants";
+import TournamentPublicGroups from "@/components/tournaments/tournament-public-groups";
 import TournamentPublicPrizes from "@/components/tournaments/tournament-public-prizes";
 import TournamentPublicContact from "@/components/tournaments/tournament-public-contact";
 import {
@@ -612,43 +613,7 @@ export default function TournamentPublic({
     });
   }, [participantRows, normalizedParticipantQuery]);
 
-  const groupSeedings = useMemo(() => {
-    const map = new Map<
-      string,
-      { category: Category; groups: Map<string, Registration[]> }
-    >();
-    tournament.registrations.forEach((registration) => {
-      const category =
-        categoriesById.get(registration.categoryId) ??
-        tournament.categories.find((entry) => entry.categoryId === registration.categoryId)
-          ?.category;
-      if (!category) return;
-      if (!registration.groupName) return;
-      const entry = map.get(registration.categoryId) ?? {
-        category,
-        groups: new Map<string, Registration[]>(),
-      };
-      const groupKey = registration.groupName.trim() || "A";
-      const list = entry.groups.get(groupKey) ?? [];
-      list.push(registration);
-      entry.groups.set(groupKey, list);
-      map.set(registration.categoryId, entry);
-    });
 
-    return Array.from(map.values()).map((entry) => {
-      const groups = Array.from(entry.groups.entries()).map(([key, list]) => {
-        const sorted = [...list].sort((a, b) => {
-          const rankA = a.rankingNumber ?? Number.MAX_SAFE_INTEGER;
-          const rankB = b.rankingNumber ?? Number.MAX_SAFE_INTEGER;
-          if (rankA !== rankB) return rankA - rankB;
-          return a.createdAt.localeCompare(b.createdAt);
-        });
-        return { key, list: sorted };
-      });
-      groups.sort((a, b) => a.key.localeCompare(b.key));
-      return { category: entry.category, groups };
-    });
-  }, [tournament.registrations, categoriesById, tournament.categories]);
 
   const safeCategories = Array.isArray(tournament.categories)
     ? tournament.categories
@@ -1208,71 +1173,10 @@ export default function TournamentPublic({
         )}
 
         {tab === "groups" && (
-          <section className="mt-8 space-y-6">
-            {groupSeedings.length === 0 ? (
-              <div className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6 text-sm text-slate-500">
-                Aun no hay sembrado de grupos.
-              </div>
-            ) : (
-              groupSeedings.map((entry) => (
-                <div
-                  key={`groups-${entry.category.id}`}
-                  className="rounded-3xl border border-[var(--border)] bg-[var(--surface)] p-6"
-                >
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <h3 className="text-lg font-semibold text-slate-900">
-                        {entry.category.name}
-                      </h3>
-                      <p className="text-xs text-slate-500">
-                        {entry.category.abbreviation}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 grid gap-4 md:grid-cols-2">
-                    {entry.groups.map((group) => (
-                      <div
-                        key={`group-table-${entry.category.id}-${group.key}`}
-                        className="overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface-2)]"
-                      >
-                        <div className="bg-[var(--surface-2)] px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-blue-600 dark:text-cyan-200">
-                          Grupo {group.key}
-                        </div>
-                        <div className="overflow-x-auto">
-                          <table className="min-w-[420px] text-xs text-slate-600">
-                            <thead className="bg-[var(--surface)] uppercase tracking-[0.2em] text-slate-500">
-                              <tr>
-                                <th className="px-3 py-2 text-left">Ranking</th>
-                                <th className="px-3 py-2 text-left">Jugador/Equipo</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-white/5">
-                              {group.list.map((registration) => (
-                                <tr key={registration.id}>
-                                  <td className="px-3 py-2">
-                                    {registration.rankingNumber ?? "-"}
-                                  </td>
-                                  <td className="px-3 py-2">
-                                    <p className="font-semibold text-slate-900">
-                                      {teamLabel(registration)}
-                                    </p>
-                                    <p className="mt-1 text-[11px] text-slate-500">
-                                      {teamMembersLabel(registration)}
-                                    </p>
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))
-            )}
-          </section>
+          <TournamentPublicGroups
+            registrations={tournament.registrations}
+            categories={tournament.categories}
+          />
         )}
 
         {tab === "fixture" && (
