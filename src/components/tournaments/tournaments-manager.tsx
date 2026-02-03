@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import TournamentDraws from "@/components/tournaments/tournament-draws";
 import TournamentFixture from "@/components/tournaments/tournament-fixture";
@@ -9,12 +9,14 @@ import TournamentFinalStandings from "@/components/tournaments/tournament-final-
 import TournamentPrizes from "@/components/tournaments/tournament-prizes";
 import TournamentRegistrations from "@/components/tournaments/tournament-registrations";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Country, State, City } from "country-state-city";
 import "quill/dist/quill.snow.css";
 import { useSearchParams } from "next/navigation";
 
 type League = {
   id: string;
   name: string;
+  sportId: string;
 };
 
 type Sport = {
@@ -56,6 +58,7 @@ type TournamentClub = {
   name: string;
   address: string | null;
   courtsCount?: number | null;
+  courtLabels?: string[] | null;
 };
 
 type TournamentSponsor = {
@@ -71,6 +74,11 @@ type Tournament = {
   name: string;
   sportId: string | null;
   address: string | null;
+  countryCode?: string | null;
+  countryName?: string | null;
+  regionCode?: string | null;
+  regionName?: string | null;
+  cityName?: string | null;
   photoUrl: string | null;
   liveStreamTitle?: string | null;
   liveStreamUrl?: string | null;
@@ -78,6 +86,11 @@ type Tournament = {
   rankingEnabled: boolean;
   status: "WAITING" | "ACTIVE" | "FINISHED";
   paymentRate: string;
+  paymentPaidAmount: string;
+  paymentReportedAmount?: string | null;
+  paymentReportedNote?: string | null;
+  paymentReportedAt?: string | Date | null;
+  paymentReportedBy?: { id: string; name: string | null; email: string } | null;
   leagueId: string | null;
   league?: League | null;
   ownerId?: string | null;
@@ -96,7 +109,10 @@ type ClubForm = {
   name: string;
   address: string;
   courtsCount: string;
+  courtLabels: string[];
 };
+
+type ClubField = "name" | "address" | "courtsCount";
 
 type SponsorForm = {
   name: string;
@@ -118,7 +134,29 @@ type Props = {
   currentUserId: string;
 };
 
-const createEmptyClub = (): ClubForm => ({ name: "", address: "", courtsCount: "1" });
+const defaultCourtLabel = (index: number) => String(index + 1);
+
+const buildCourtLabels = (count: number, existing?: string[] | null) => {
+  if (count < 1) return [];
+  const existingLabels = Array.isArray(existing) ? existing : [];
+  if (existingLabels.length === 0) {
+    return Array.from({ length: count }, (_, index) => defaultCourtLabel(index));
+  }
+  const next = existingLabels
+    .map((label) => (typeof label === "string" ? label : ""))
+    .slice(0, count);
+  while (next.length < count) {
+    next.push(defaultCourtLabel(next.length));
+  }
+  return next;
+};
+
+const createEmptyClub = (): ClubForm => ({
+  name: "",
+  address: "",
+  courtsCount: "1",
+  courtLabels: buildCourtLabels(1),
+});
 const createEmptySponsor = (): SponsorForm => ({
   name: "",
   imageUrl: "",
@@ -211,8 +249,27 @@ export default function TournamentsManager({
   const [roundRobinComplete, setRoundRobinComplete] = useState(false);
   const [stepNineUnlocked, setStepNineUnlocked] = useState(false);
   const [activePaymentRate, setActivePaymentRate] = useState("0");
+  const [activePaymentPaidAmount, setActivePaymentPaidAmount] = useState("0");
+  const [activePaymentReportedAmount, setActivePaymentReportedAmount] =
+    useState<string | null>(null);
+  const [activePaymentReportedNote, setActivePaymentReportedNote] =
+    useState<string | null>(null);
+  const [activePaymentReportedAt, setActivePaymentReportedAt] =
+    useState<string | null>(null);
+  const [activePaymentReportedBy, setActivePaymentReportedBy] = useState<{
+    id: string;
+    name: string | null;
+    email: string;
+  } | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentRateInput, setPaymentRateInput] = useState("0");
+  const [paymentPaidDeltaInput, setPaymentPaidDeltaInput] = useState("");
+  const [paymentReportedAmountInput, setPaymentReportedAmountInput] =
+    useState("");
+  const [paymentReportedNoteInput, setPaymentReportedNoteInput] = useState("");
+  const [savingPaymentPaid, setSavingPaymentPaid] = useState(false);
+  const [savingPaymentReport, setSavingPaymentReport] = useState(false);
+  const [reviewingPaymentReport, setReviewingPaymentReport] = useState(false);
   const [paymentCount, setPaymentCount] = useState(0);
   const [loadingPayment, setLoadingPayment] = useState(false);
   const [paymentQrUrl, setPaymentQrUrl] = useState<string | null>(null);
@@ -224,9 +281,14 @@ export default function TournamentsManager({
   const [form, setForm] = useState({
     name: "",
     sportId: sports[0]?.id ?? "",
-    leagueId: leagues[0]?.id ?? "",
+    leagueId: leagues.find((league) => league.sportId === sports[0]?.id)?.id ?? "",
     rankingEnabled: true,
     address: "",
+    countryCode: "",
+    countryName: "",
+    regionCode: "",
+    regionName: "",
+    cityName: "",
     photoUrl: "",
     liveStreamTitle: "",
     liveStreamUrl: "",
@@ -256,6 +318,7 @@ export default function TournamentsManager({
   >({});
   const [uploadingTournamentPhoto, setUploadingTournamentPhoto] = useState(false);
   const [savingLiveStreams, setSavingLiveStreams] = useState(false);
+  const [showCourtLabels, setShowCourtLabels] = useState(false);
   const rulesEditorRef = useRef<HTMLDivElement | null>(null);
   const quillRef = useRef<any>(null);
   const lastRulesHtmlRef = useRef<string>("");
@@ -471,10 +534,41 @@ export default function TournamentsManager({
     quillInstance.clipboard.dangerouslyPasteHTML(next, "silent");
   }, [form.rulesText]);
 
+  const countries = useMemo(() => {
+    const list = Country.getAllCountries().map((country) => ({
+      code: country.isoCode,
+      name: country.name,
+    }));
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, []);
+
+  const stateOptions = useMemo(() => {
+    if (!form.countryCode) return [];
+    return State.getStatesOfCountry(form.countryCode).map((state) => ({
+      value: state.isoCode,
+      label: state.name,
+    }));
+  }, [form.countryCode]);
+
+  const regionRequired = stateOptions.length > 0;
+
+  const cityOptions = useMemo(() => {
+    if (!form.countryCode) return [];
+    const cities =
+      regionRequired && form.regionCode
+        ? City.getCitiesOfState(form.countryCode, form.regionCode)
+        : City.getCitiesOfCountry(form.countryCode);
+    return cities.map((city) => ({
+      value: city.name,
+      label: city.name,
+    }));
+  }, [form.countryCode, form.regionCode, regionRequired]);
+
   const canSubmit = useMemo(() => {
     if (!form.name.trim()) return false;
     if (!form.sportId) return false;
     if (form.rankingEnabled && !form.leagueId) return false;
+    if (!form.countryCode) return false;
     if (!form.startDate || !form.registrationDeadline) return false;
     if (!noEndDate && !form.endDate) return false;
     if (!noEndDate && form.endDate < form.startDate) return false;
@@ -515,6 +609,7 @@ export default function TournamentsManager({
   }, [
     form,
     noEndDate,
+    regionRequired,
     selectedCategoryIds,
     categoryPrices,
     categorySecondaryPrices,
@@ -525,9 +620,14 @@ export default function TournamentsManager({
     setForm({
       name: "",
       sportId: sports[0]?.id ?? "",
-      leagueId: leagues[0]?.id ?? "",
+      leagueId: leagues.find((league) => league.sportId === sports[0]?.id)?.id ?? "",
       rankingEnabled: true,
       address: "",
+      countryCode: "",
+      countryName: "",
+      regionCode: "",
+      regionName: "",
+      cityName: "",
       photoUrl: "",
       liveStreamTitle: "",
       liveStreamUrl: "",
@@ -550,7 +650,12 @@ export default function TournamentsManager({
     setActiveTournamentName("");
     setActiveTournamentStatus("WAITING");
     setActivePaymentRate("0");
-    setCurrentStep(nextStep ?? 1);
+    setActivePaymentPaidAmount("0");
+    setActivePaymentReportedAmount(null);
+    setActivePaymentReportedNote(null);
+    setActivePaymentReportedAt(null);
+    setActivePaymentReportedBy(null);
+    setCurrentStep(1);
   };
 
   useEffect(() => {
@@ -574,6 +679,23 @@ export default function TournamentsManager({
           tournament.paymentRate !== undefined && tournament.paymentRate !== null
             ? String(tournament.paymentRate)
             : "0",
+        paymentPaidAmount:
+          tournament.paymentPaidAmount !== undefined &&
+          tournament.paymentPaidAmount !== null
+            ? String(tournament.paymentPaidAmount)
+            : "0",
+        paymentReportedAmount:
+          tournament.paymentReportedAmount !== undefined &&
+          tournament.paymentReportedAmount !== null
+            ? String(tournament.paymentReportedAmount)
+            : null,
+        paymentReportedNote:
+          tournament.paymentReportedNote !== undefined &&
+          tournament.paymentReportedNote !== null
+            ? String(tournament.paymentReportedNote)
+            : null,
+        paymentReportedAt: tournament.paymentReportedAt ?? null,
+        paymentReportedBy: tournament.paymentReportedBy ?? null,
         status: tournament.status ?? "WAITING",
         sponsors: Array.isArray(tournament.sponsors) ? tournament.sponsors : [],
       }));
@@ -588,6 +710,27 @@ export default function TournamentsManager({
         if (updated?.paymentRate !== undefined) {
           setActivePaymentRate(String(updated.paymentRate));
         }
+        if (updated?.paymentPaidAmount !== undefined) {
+          setActivePaymentPaidAmount(String(updated.paymentPaidAmount));
+        }
+        setActivePaymentReportedAmount(
+          updated?.paymentReportedAmount !== undefined &&
+            updated?.paymentReportedAmount !== null
+            ? String(updated.paymentReportedAmount)
+            : null
+        );
+        setActivePaymentReportedNote(
+          updated?.paymentReportedNote !== undefined &&
+            updated?.paymentReportedNote !== null
+            ? String(updated.paymentReportedNote)
+            : null
+        );
+        setActivePaymentReportedAt(
+          updated?.paymentReportedAt ? String(updated.paymentReportedAt) : null
+        );
+        setActivePaymentReportedBy(
+          updated?.paymentReportedBy ? updated.paymentReportedBy : null
+        );
       }
     }
   };
@@ -606,6 +749,25 @@ export default function TournamentsManager({
       if (updated?.paymentRate !== undefined) {
         setActivePaymentRate(String(updated.paymentRate));
       }
+      if (updated?.paymentPaidAmount !== undefined) {
+        setActivePaymentPaidAmount(String(updated.paymentPaidAmount));
+      }
+      setActivePaymentReportedAmount(
+        updated?.paymentReportedAmount !== undefined &&
+          updated?.paymentReportedAmount !== null
+          ? String(updated.paymentReportedAmount)
+          : null
+      );
+      setActivePaymentReportedNote(
+        updated?.paymentReportedNote !== undefined &&
+          updated?.paymentReportedNote !== null
+          ? String(updated.paymentReportedNote)
+          : null
+      );
+      setActivePaymentReportedAt(
+        updated?.paymentReportedAt ? String(updated.paymentReportedAt) : null
+      );
+      setActivePaymentReportedBy(updated?.paymentReportedBy ?? null);
     }
   };
 
@@ -667,10 +829,27 @@ export default function TournamentsManager({
     }
   };
 
-  const updateClub = (index: number, field: keyof ClubForm, value: string) => {
+  const updateClub = (index: number, field: ClubField, value: string) => {
     setForm((prev) => {
       const clubs = [...prev.clubs];
-      clubs[index] = { ...clubs[index], [field]: value };
+      const nextClub = { ...clubs[index], [field]: value };
+      if (field === "courtsCount") {
+        const parsed = parseCourtsCountInput(value) ?? 1;
+        nextClub.courtLabels = buildCourtLabels(parsed, nextClub.courtLabels);
+      }
+      clubs[index] = nextClub;
+      return { ...prev, clubs };
+    });
+  };
+
+  const updateCourtLabel = (clubIndex: number, labelIndex: number, value: string) => {
+    setForm((prev) => {
+      const clubs = [...prev.clubs];
+      const club = { ...clubs[clubIndex] };
+      const labels = [...club.courtLabels];
+      labels[labelIndex] = value;
+      club.courtLabels = labels;
+      clubs[clubIndex] = club;
       return { ...prev, clubs };
     });
   };
@@ -717,7 +896,9 @@ export default function TournamentsManager({
   };
 
   const handleSportChange = (sportId: string) => {
-    setForm((prev) => ({ ...prev, sportId }));
+    const nextLeagueId =
+      leagues.find((league) => league.sportId === sportId)?.id ?? "";
+    setForm((prev) => ({ ...prev, sportId, leagueId: nextLeagueId }));
     setSelectedCategoryIds(new Set());
     setCategoryPrices({});
     setCategorySecondaryPrices({});
@@ -826,6 +1007,23 @@ export default function TournamentsManager({
     setActiveTournamentName(tournament.name);
     setActiveTournamentStatus(tournament.status ?? "WAITING");
     setActivePaymentRate(tournament.paymentRate ?? "0");
+    setActivePaymentPaidAmount(tournament.paymentPaidAmount ?? "0");
+    setActivePaymentReportedAmount(
+      tournament.paymentReportedAmount !== undefined &&
+        tournament.paymentReportedAmount !== null
+        ? String(tournament.paymentReportedAmount)
+        : null
+    );
+    setActivePaymentReportedNote(
+      tournament.paymentReportedNote !== undefined &&
+        tournament.paymentReportedNote !== null
+        ? String(tournament.paymentReportedNote)
+        : null
+    );
+    setActivePaymentReportedAt(
+      tournament.paymentReportedAt ? String(tournament.paymentReportedAt) : null
+    );
+    setActivePaymentReportedBy(tournament.paymentReportedBy ?? null);
     setCurrentStep(nextStep ?? 1);
     const normalizedStreams = Array.isArray(tournament.liveStreams)
       ? tournament.liveStreams
@@ -853,6 +1051,11 @@ export default function TournamentsManager({
       leagueId: tournament.leagueId ?? "",
       rankingEnabled: tournament.rankingEnabled ?? true,
       address: tournament.address ?? "",
+      countryCode: tournament.countryCode ?? "",
+      countryName: tournament.countryName ?? "",
+      regionCode: tournament.regionCode ?? "",
+      regionName: tournament.regionName ?? "",
+      cityName: tournament.cityName ?? "",
       photoUrl: tournament.photoUrl ?? "",
       liveStreamTitle: tournament.liveStreamTitle ?? "",
       liveStreamUrl: tournament.liveStreamUrl ?? "",
@@ -870,6 +1073,12 @@ export default function TournamentsManager({
               typeof club.courtsCount === "number" && Number.isFinite(club.courtsCount)
                 ? String(club.courtsCount)
                 : "1",
+            courtLabels: buildCourtLabels(
+              typeof club.courtsCount === "number" && Number.isFinite(club.courtsCount)
+                ? club.courtsCount
+                : 1,
+              club.courtLabels
+            ),
           }))
         : [createEmptyClub()],
       sponsors: tournament.sponsors?.length
@@ -913,7 +1122,7 @@ export default function TournamentsManager({
       return;
     }
     const confirmed = window.confirm(
-      `Eliminar el torneo "${tournament.name}"? Esta accion no se puede deshacer.`
+      `Eliminar el torneo "${tournament.name}"?\nSi realizaste algun pago y ya no quieres hacer el torneo, puedes eliminarlo, pero no habra devoluciones.\nEsta accion no se puede deshacer.`
     );
     if (!confirmed) return;
 
@@ -1031,6 +1240,11 @@ export default function TournamentsManager({
       leagueId: form.leagueId,
       rankingEnabled: form.rankingEnabled,
       address: form.address || null,
+      countryCode: form.countryCode || null,
+      countryName: form.countryName || null,
+      regionCode: form.regionCode || null,
+      regionName: form.regionName || null,
+      cityName: form.cityName || null,
       photoUrl: form.photoUrl || null,
       liveStreamTitle: form.liveStreamTitle || null,
       liveStreamUrl: form.liveStreamUrl || null,
@@ -1055,6 +1269,7 @@ export default function TournamentsManager({
         name: club.name,
         address: club.address || null,
         courtsCount: parseCourtsCountInput(club.courtsCount) ?? 1,
+        courtLabels: club.courtLabels,
       })),
       sponsors: form.sponsors
         .filter((sponsor) => sponsor.imageUrl.trim().length > 0)
@@ -1099,6 +1314,9 @@ export default function TournamentsManager({
       if (savedTournament?.paymentRate !== undefined) {
         setActivePaymentRate(String(savedTournament.paymentRate));
       }
+      if (savedTournament?.paymentPaidAmount !== undefined) {
+        setActivePaymentPaidAmount(String(savedTournament.paymentPaidAmount));
+      }
     }
 
     await refreshTournaments();
@@ -1112,6 +1330,16 @@ export default function TournamentsManager({
     setCurrentStep(2);
   };
 
+  const handleSaveSponsors = async () => {
+    if (!canSubmit) {
+      setError("Completa el paso 1 para guardar los auspiciadores");
+      return;
+    }
+    const saved = await saveTournament();
+    if (!saved) return;
+    setMessage("Auspiciadores guardados");
+  };
+
   const sortedTournaments = useMemo(
     () => [...tournaments].sort((a, b) => a.name.localeCompare(b.name)),
     [tournaments]
@@ -1121,6 +1349,22 @@ export default function TournamentsManager({
     if (!form.sportId) return [];
     return categories.filter((category) => category.sport?.id === form.sportId);
   }, [categories, form.sportId]);
+
+  const filteredLeagues = useMemo(() => {
+    if (!form.sportId) return leagues;
+    return leagues.filter((league) => league.sportId === form.sportId);
+  }, [leagues, form.sportId]);
+
+  useEffect(() => {
+    if (!form.sportId) return;
+    if (!form.leagueId) return;
+    const matches = leagues.some(
+      (league) => league.id === form.leagueId && league.sportId === form.sportId
+    );
+    if (!matches) {
+      setForm((prev) => ({ ...prev, leagueId: "" }));
+    }
+  }, [form.leagueId, form.sportId, leagues]);
 
   const selectedCategories = useMemo(
     () => filteredCategories.filter((category) => selectedCategoryIds.has(category.id)),
@@ -1138,6 +1382,16 @@ export default function TournamentsManager({
     [selectedCategories, categoryPrices, categorySecondaryPrices, categorySiblingPrices]
   );
   const rulesEmpty = isRulesEmpty(form.rulesText);
+  const paymentRateValue = parsePriceInput(paymentRateInput) ?? 0;
+  const paymentPaidValue = parsePriceInput(activePaymentPaidAmount) ?? 0;
+  const paymentTotal = paymentRateValue * paymentCount;
+  const paymentPending = Math.max(0, paymentTotal - paymentPaidValue);
+  const paymentComplete = paymentPending <= 0.005;
+  const paymentDeltaValue = parsePriceInput(paymentPaidDeltaInput);
+  const canRegisterPayment = paymentDeltaValue !== null && paymentDeltaValue > 0;
+  const paymentReportedValue = parsePriceInput(paymentReportedAmountInput);
+  const canReportPayment =
+    paymentReportedValue !== null && paymentReportedValue > 0;
 
   const stepTwoEnabled = Boolean(activeTournamentId);
   const stepThreeEnabled = Boolean(activeTournamentId);
@@ -1216,6 +1470,9 @@ export default function TournamentsManager({
       : 0;
     setPaymentCount(count);
     setPaymentRateInput(activePaymentRate || "0");
+    setPaymentPaidDeltaInput("");
+    setPaymentReportedAmountInput(activePaymentReportedAmount ?? "");
+    setPaymentReportedNoteInput(activePaymentReportedNote ?? "");
     setShowPaymentModal(true);
   };
 
@@ -1226,8 +1483,109 @@ export default function TournamentsManager({
   }, [activeTournamentId]);
 
   const handlePaymentReported = () => {
-    setShowPaymentModal(false);
-    setMessage("Pago reportado. Un administrador debe activar el torneo.");
+    if (!activeTournamentId) return;
+    const parsed = parsePriceInput(paymentReportedAmountInput);
+    if (parsed === null || parsed <= 0) {
+      setError("Ingresa un monto valido");
+      return;
+    }
+    setSavingPaymentReport(true);
+    setError(null);
+    setMessage(null);
+    fetch(`/api/tournaments/${activeTournamentId}/payment-report`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        paymentReportedAmount: parsed,
+        paymentReportedNote: paymentReportedNoteInput,
+      }),
+    })
+      .then((res) =>
+        res
+          .json()
+          .catch(() => ({}))
+          .then((data) => ({ res, data }))
+      )
+      .then(({ res, data }) => {
+        if (!res.ok) {
+          const detail = data?.detail ? ` (${data.detail})` : "";
+          setError(`${data?.error ?? "No se pudo reportar el pago"}${detail}`);
+          return;
+        }
+        setActivePaymentReportedAmount(
+          data?.tournament?.paymentReportedAmount ?? String(parsed)
+        );
+        setActivePaymentReportedNote(data?.tournament?.paymentReportedNote ?? null);
+        setActivePaymentReportedAt(data?.tournament?.paymentReportedAt ?? null);
+        setActivePaymentReportedBy(data?.tournament?.paymentReportedBy ?? null);
+        setShowPaymentModal(false);
+        setMessage("Pago reportado. Un administrador debe aprobarlo.");
+      })
+      .finally(() => setSavingPaymentReport(false));
+  };
+
+  const approvePaymentReport = async () => {
+    if (!activeTournamentId) return;
+    setReviewingPaymentReport(true);
+    setError(null);
+    setMessage(null);
+    const res = await fetch(
+      `/api/tournaments/${activeTournamentId}/payment-report/approve`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      }
+    );
+    const data = await res.json().catch(() => ({}));
+    setReviewingPaymentReport(false);
+    if (!res.ok) {
+      const detail = data?.detail ? ` (${data.detail})` : "";
+      setError(`${data?.error ?? "No se pudo aprobar el reporte"}${detail}`);
+      return;
+    }
+    if (data?.tournament?.paymentPaidAmount !== undefined) {
+      setActivePaymentPaidAmount(String(data.tournament.paymentPaidAmount));
+    }
+    setActivePaymentReportedAmount(null);
+    setActivePaymentReportedNote(null);
+    setActivePaymentReportedAt(null);
+    setActivePaymentReportedBy(null);
+    setPaymentReportedAmountInput("");
+    setPaymentReportedNoteInput("");
+    await refreshTournaments();
+    setMessage("Pago reportado aprobado");
+  };
+
+  const rejectPaymentReport = async () => {
+    if (!activeTournamentId) return;
+    setReviewingPaymentReport(true);
+    setError(null);
+    setMessage(null);
+    const res = await fetch(
+      `/api/tournaments/${activeTournamentId}/payment-report/reject`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      }
+    );
+    const data = await res.json().catch(() => ({}));
+    setReviewingPaymentReport(false);
+    if (!res.ok) {
+      const detail = data?.detail ? ` (${data.detail})` : "";
+      setError(`${data?.error ?? "No se pudo rechazar el reporte"}${detail}`);
+      return;
+    }
+    setActivePaymentReportedAmount(null);
+    setActivePaymentReportedNote(null);
+    setActivePaymentReportedAt(null);
+    setActivePaymentReportedBy(null);
+    setPaymentReportedAmountInput("");
+    setPaymentReportedNoteInput("");
+    await refreshTournaments();
+    setMessage("Reporte rechazado");
   };
 
   const savePaymentRate = async () => {
@@ -1256,6 +1614,42 @@ export default function TournamentsManager({
     setPaymentRateInput(String(nextRate));
     await refreshTournaments();
     setMessage("Monto actualizado");
+  };
+
+  const savePaymentPaidDelta = async () => {
+    if (!activeTournamentId) return;
+    const parsed = parsePriceInput(paymentPaidDeltaInput);
+    if (parsed === null || parsed <= 0) {
+      setError("Ingresa un monto valido");
+      return;
+    }
+    setSavingPaymentPaid(true);
+    setError(null);
+    setMessage(null);
+    const res = await fetch(
+      `/api/tournaments/${activeTournamentId}/payment`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ paymentPaidDelta: parsed }),
+      }
+    );
+    const data = await res.json().catch(() => ({}));
+    setSavingPaymentPaid(false);
+    if (!res.ok) {
+      const detail = data?.detail ? ` (${data.detail})` : "";
+      setError(`${data?.error ?? "No se pudo registrar el pago"}${detail}`);
+      return;
+    }
+    const nextPaid =
+      data?.tournament?.paymentPaidAmount !== undefined
+        ? String(data.tournament.paymentPaidAmount)
+        : activePaymentPaidAmount;
+    setActivePaymentPaidAmount(nextPaid);
+    setPaymentPaidDeltaInput("");
+    await refreshTournaments();
+    setMessage("Pago registrado");
   };
 
   return (
@@ -1486,17 +1880,105 @@ export default function TournamentsManager({
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:bg-slate-100"
               >
                 <option value="">Selecciona liga</option>
-                {leagues.map((league) => (
+                {filteredLeagues.map((league) => (
                   <option key={league.id} value={league.id}>
                     {league.name}
                   </option>
                 ))}
               </select>
-              {form.rankingEnabled && leagues.length === 0 && (
+              {form.rankingEnabled && filteredLeagues.length === 0 && (
                 <p className="text-xs text-slate-500">
-                  Primero crea una liga para poder asignar el ranking.
+                  Primero crea una liga para el deporte seleccionado.
                 </p>
               )}
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Pais</label>
+              <select
+                value={form.countryCode}
+                onChange={(e) => {
+                  const selected = countries.find(
+                    (country) => country.code === e.target.value
+                  );
+                  setForm((prev) => ({
+                    ...prev,
+                    countryCode: selected?.code ?? "",
+                    countryName: selected?.name ?? "",
+                    regionCode: "",
+                    regionName: "",
+                    cityName: "",
+                  }));
+                }}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+              >
+                <option value="">Selecciona pais</option>
+                {countries.map((country) => (
+                  <option key={country.code} value={country.code}>
+                    {country.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">
+                Departamento / Estado
+              </label>
+              <select
+                value={form.regionCode}
+                onChange={(e) => {
+                  const selected = stateOptions.find(
+                    (option) => option.value === e.target.value
+                  );
+                  setForm((prev) => ({
+                    ...prev,
+                    regionCode: selected?.value ?? "",
+                    regionName: selected?.label ?? "",
+                    cityName: "",
+                  }));
+                }}
+                disabled={!form.countryCode || !regionRequired}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:bg-slate-100"
+              >
+                <option value="">
+                  {!form.countryCode
+                    ? "Selecciona pais"
+                    : regionRequired
+                      ? "Selecciona departamento"
+                      : "No aplica"}
+                </option>
+                {stateOptions.map((option) => (
+                  <option key={`state-${option.value}`} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Ciudad</label>
+              <select
+                value={form.cityName}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    cityName: e.target.value,
+                  }))
+                }
+                disabled={!form.countryCode || (regionRequired && !form.regionCode)}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:bg-slate-100"
+              >
+                <option value="">
+                  {!form.countryCode
+                    ? "Selecciona pais"
+                    : regionRequired && !form.regionCode
+                      ? "Selecciona departamento"
+                      : "Selecciona ciudad"}
+                </option>
+                {cityOptions.map((option, index) => (
+                  <option key={`city-${option.value}-${index}`} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="space-y-2 md:col-span-2">
               <label className="text-sm font-medium text-slate-700">
@@ -1723,13 +2205,23 @@ export default function TournamentsManager({
                   Agrega hasta 13 logos con link para la pagina publica del torneo.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={addSponsor}
-                className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-700 shadow-sm transition hover:border-slate-300"
-              >
-                + Agregar auspiciador
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={addSponsor}
+                  className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-700 shadow-sm transition hover:border-slate-300"
+                >
+                  + Agregar auspiciador
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveSponsors}
+                  disabled={!canSubmit || loading}
+                  className="inline-flex items-center justify-center rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {loading ? "Guardando..." : "Guardar auspiciadores"}
+                </button>
+              </div>
             </div>
 
             {form.sponsors.length === 0 ? (
@@ -1870,21 +2362,33 @@ export default function TournamentsManager({
                   Agrega los complejos deportivos que usara el torneo.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={addClub}
-                className="inline-flex items-center justify-center rounded-full border border-indigo-200/80 bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-indigo-700 shadow-sm transition hover:bg-indigo-50"
-              >
-                + Agregar club
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCourtLabels((prev) => !prev)}
+                  className="inline-flex items-center justify-center rounded-full border border-slate-200/80 bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-slate-700 shadow-sm transition hover:bg-white"
+                >
+                  {showCourtLabels ? "Ocultar personalizacion" : "Personalizar mas"}
+                </button>
+                <button
+                  type="button"
+                  onClick={addClub}
+                  className="inline-flex items-center justify-center rounded-full border border-indigo-200/80 bg-white/80 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-indigo-700 shadow-sm transition hover:bg-indigo-50"
+                >
+                  + Agregar club
+                </button>
+              </div>
             </div>
 
             <div className="mt-4 space-y-4">
-              {form.clubs.map((club, index) => (
-                <div
-                  key={`club-${index}`}
-                  className="rounded-2xl border border-slate-200/70 bg-white/90 p-4 shadow-[0_8px_20px_-18px_rgba(15,23,42,0.2)]"
-                >
+              {form.clubs.map((club, index) => {
+                const totalCourts = parseCourtsCountInput(club.courtsCount) ?? 1;
+                const courtLabels = buildCourtLabels(totalCourts, club.courtLabels);
+                return (
+                  <div
+                    key={`club-${index}`}
+                    className="rounded-2xl border border-slate-200/70 bg-white/90 p-4 shadow-[0_8px_20px_-18px_rgba(15,23,42,0.2)]"
+                  >
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-sm font-semibold text-slate-800">
                       Club {index + 1}
@@ -1939,8 +2443,39 @@ export default function TournamentsManager({
                       />
                     </div>
                   </div>
-                </div>
-              ))}
+                  {showCourtLabels && (
+                    <div className="mt-4 rounded-xl border border-slate-200/70 bg-slate-50/80 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-slate-700">
+                          Nombres de canchas
+                        </p>
+                        <span className="text-xs text-slate-500">
+                          Se muestra en el fixture y calendario
+                        </span>
+                      </div>
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {courtLabels.map((label, labelIndex) => (
+                          <div key={`club-${index}-court-${labelIndex}`} className="space-y-1">
+                            <label className="text-xs font-semibold uppercase text-slate-500">
+                              Cancha {labelIndex + 1}
+                            </label>
+                            <input
+                              type="text"
+                              value={label}
+                              onChange={(e) =>
+                                updateCourtLabel(index, labelIndex, e.target.value)
+                              }
+                              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                              placeholder={`Ej. ${String.fromCharCode(65 + labelIndex)}`}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -2536,12 +3071,169 @@ export default function TournamentsManager({
               <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/80 p-4">
                 <p className="text-sm text-emerald-700">Total a pagar</p>
                 <p className="text-2xl font-semibold text-emerald-900">
-                  {(() => {
-                    const rate = parsePriceInput(paymentRateInput) ?? 0;
-                    return `${(rate * paymentCount).toFixed(2)} Bs`;
-                  })()}
+                  {paymentTotal.toFixed(2)} Bs
                 </p>
               </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                  <p className="text-sm text-slate-600">Pagado</p>
+                  <p className="text-2xl font-semibold text-slate-900">
+                    {paymentPaidValue.toFixed(2)} Bs
+                  </p>
+                </div>
+                <div
+                  className={`rounded-2xl border p-4 ${
+                    paymentComplete
+                      ? "border-emerald-200/80 bg-emerald-50/80"
+                      : "border-amber-200/80 bg-amber-50/80"
+                  }`}
+                >
+                  <p
+                    className={`text-sm ${
+                      paymentComplete ? "text-emerald-700" : "text-amber-700"
+                    }`}
+                  >
+                    Saldo pendiente
+                  </p>
+                  <p
+                    className={`text-2xl font-semibold ${
+                      paymentComplete ? "text-emerald-900" : "text-amber-900"
+                    }`}
+                  >
+                    {paymentPending.toFixed(2)} Bs
+                  </p>
+                </div>
+              </div>
+              {isAdmin && (
+                <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-700">
+                      Registrar pago
+                    </label>
+                    <input
+                      value={paymentPaidDeltaInput}
+                      onChange={(event) => setPaymentPaidDeltaInput(event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                      placeholder="Ej. 50.00"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={savePaymentPaidDelta}
+                    disabled={!canRegisterPayment || savingPaymentPaid}
+                    className="h-[42px] self-end rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {savingPaymentPaid ? "Registrando..." : "Agregar pago"}
+                  </button>
+                </div>
+              )}
+              {isAdmin && activePaymentReportedAmount && (
+                <div className="rounded-2xl border border-amber-200/80 bg-amber-50/80 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">
+                    Reporte pendiente
+                  </p>
+                  <div className="mt-2 grid gap-2 text-xs text-amber-900 sm:grid-cols-2">
+                    <div>
+                      <span className="font-semibold">Monto:</span>{" "}
+                      {activePaymentReportedAmount} Bs
+                    </div>
+                    <div>
+                      <span className="font-semibold">Reportado:</span>{" "}
+                      {activePaymentReportedAt
+                        ? new Date(activePaymentReportedAt).toISOString().split("T")[0]
+                        : "N/D"}
+                    </div>
+                    {activePaymentReportedBy && (
+                      <div className="sm:col-span-2">
+                        <span className="font-semibold">Usuario:</span>{" "}
+                        {activePaymentReportedBy.name ??
+                          activePaymentReportedBy.email}
+                      </div>
+                    )}
+                    {activePaymentReportedNote && (
+                      <div className="sm:col-span-2">
+                        <span className="font-semibold">Nota:</span>{" "}
+                        {activePaymentReportedNote}
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={approvePaymentReport}
+                      disabled={reviewingPaymentReport}
+                      className="rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      Aprobar reporte
+                    </button>
+                    <button
+                      type="button"
+                      onClick={rejectPaymentReport}
+                      disabled={reviewingPaymentReport}
+                      className="rounded-full border border-amber-300 bg-white px-4 py-1.5 text-xs font-semibold text-amber-700 shadow-sm transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      Rechazar
+                    </button>
+                  </div>
+                </div>
+              )}
+              {!isAdmin && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+                    Reportar pago
+                  </p>
+                  <div className="mt-3 grid gap-3">
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-slate-700">
+                        Monto pagado
+                      </label>
+                      <input
+                        value={paymentReportedAmountInput}
+                        onChange={(event) =>
+                          setPaymentReportedAmountInput(event.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                        placeholder="Ej. 50.00"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-slate-700">
+                        Nota (opcional)
+                      </label>
+                      <input
+                        value={paymentReportedNoteInput}
+                        onChange={(event) =>
+                          setPaymentReportedNoteInput(event.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                        placeholder="Ej. Transferencia del 03/02"
+                      />
+                    </div>
+                    {activePaymentReportedAmount && (
+                      <p className="text-xs text-amber-700">
+                        Ya existe un reporte pendiente. Si actualizas, se
+                        reemplazara el monto reportado.
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handlePaymentReported}
+                      disabled={!canReportPayment || savingPaymentReport}
+                      className="rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {savingPaymentReport
+                        ? "Reportando..."
+                        : activePaymentReportedAmount
+                          ? "Actualizar reporte"
+                          : "Reportar pago"}
+                    </button>
+                  </div>
+                </div>
+              )}
+              <p className="text-xs text-slate-500">
+                Si agregas o eliminas jugadores luego, el saldo pendiente se
+                recalculara automaticamente.
+              </p>
               {paymentQrUrl && (
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
                   <p className="text-sm text-slate-600">QR de pago</p>
@@ -2556,15 +3248,6 @@ export default function TournamentsManager({
               )}
             </div>
             <div className="mt-6 flex flex-wrap items-center justify-end gap-2">
-              {!isAdmin && (
-                <button
-                  type="button"
-                  onClick={handlePaymentReported}
-                  className="rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-700"
-                >
-                  Pago realizada
-                </button>
-              )}
               {isAdmin && (
                 <button
                   type="button"
@@ -2579,7 +3262,7 @@ export default function TournamentsManager({
                 <button
                   type="button"
                   onClick={() => updateTournamentStatus("ACTIVE")}
-                  disabled={loadingPayment}
+                  disabled={loadingPayment || !paymentComplete}
                   className="rounded-full bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   Pago finalizado

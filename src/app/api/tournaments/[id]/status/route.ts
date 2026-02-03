@@ -33,6 +33,18 @@ const parseStatus = (value: unknown): StatusInput | "INVALID" => {
   return "INVALID";
 };
 
+const countRegistrationPlayers = (registration: {
+  playerId?: string | null;
+  partnerId?: string | null;
+  partnerTwoId?: string | null;
+}) => {
+  let count = 0;
+  if (registration.playerId) count += 1;
+  if (registration.partnerId) count += 1;
+  if (registration.partnerTwoId) count += 1;
+  return count;
+};
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -64,6 +76,8 @@ export async function PATCH(
       rankingEnabled: true,
       startDate: true,
       createdAt: true,
+      paymentRate: true,
+      paymentPaidAmount: true,
     },
   });
 
@@ -91,6 +105,26 @@ export async function PATCH(
       );
     }
     // Permite finalizar aunque falten partidos, segun la solicitud del administrador.
+  }
+
+  if (status === "ACTIVE") {
+    const registrations = await prisma.tournamentRegistration.findMany({
+      where: { tournamentId },
+      select: { playerId: true, partnerId: true, partnerTwoId: true },
+    });
+    const playersCount = registrations.reduce(
+      (sum, registration) => sum + countRegistrationPlayers(registration),
+      0
+    );
+    const rate = Number.parseFloat(String(tournament.paymentRate ?? 0));
+    const paid = Number.parseFloat(String(tournament.paymentPaidAmount ?? 0));
+    const total = rate * playersCount;
+    if (paid + 0.005 < total) {
+      return NextResponse.json(
+        { error: "Aun hay saldo pendiente por pagar" },
+        { status: 400 }
+      );
+    }
   }
 
   const shouldApplyRanking =

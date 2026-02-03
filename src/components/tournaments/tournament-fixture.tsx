@@ -57,6 +57,11 @@ type FixtureResponse = {
   tournamentStatus?: "WAITING" | "ACTIVE" | "FINISHED";
   groupsPublished?: boolean;
   paymentRate?: string;
+  paymentPaidAmount?: string;
+  paymentReportedAmount?: string | null;
+  paymentReportedNote?: string | null;
+  paymentReportedAt?: string | null;
+  paymentReportedBy?: { id: string; name: string | null; email: string } | null;
   sessionRole?: "ADMIN" | "TOURNAMENT_ADMIN";
 };
 
@@ -94,6 +99,15 @@ const countRegistrationPlayers = (registration: Registration) => {
   return count;
 };
 
+const parseMoneyInput = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.replace(",", ".");
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 export default function TournamentFixture({ tournamentId, tournamentName }: Props) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [registrations, setRegistrations] = useState<Registration[]>([]);
@@ -103,10 +117,30 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
     "WAITING" | "ACTIVE" | "FINISHED"
   >("WAITING");
   const [paymentRate, setPaymentRate] = useState("0");
+  const [paymentPaidAmount, setPaymentPaidAmount] = useState("0");
+  const [paymentReportedAmount, setPaymentReportedAmount] = useState<string | null>(
+    null
+  );
+  const [paymentReportedNote, setPaymentReportedNote] = useState<string | null>(
+    null
+  );
+  const [paymentReportedAt, setPaymentReportedAt] = useState<string | null>(null);
+  const [paymentReportedBy, setPaymentReportedBy] = useState<{
+    id: string;
+    name: string | null;
+    email: string;
+  } | null>(null);
   const [sessionRole, setSessionRole] = useState<
     "ADMIN" | "TOURNAMENT_ADMIN"
   >("TOURNAMENT_ADMIN");
   const [groupsPublished, setGroupsPublished] = useState(false);
+  const [paymentPaidDeltaInput, setPaymentPaidDeltaInput] = useState("");
+  const [paymentReportedAmountInput, setPaymentReportedAmountInput] =
+    useState("");
+  const [paymentReportedNoteInput, setPaymentReportedNoteInput] = useState("");
+  const [savingPaymentPaid, setSavingPaymentPaid] = useState(false);
+  const [savingPaymentReport, setSavingPaymentReport] = useState(false);
+  const [reviewingPaymentReport, setReviewingPaymentReport] = useState(false);
   const [publishingGroups, setPublishingGroups] = useState(false);
   const [paymentQrUrl, setPaymentQrUrl] = useState<string | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -170,6 +204,31 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
     if (data.paymentRate !== undefined) {
       setPaymentRate(String(data.paymentRate));
     }
+    if (data.paymentPaidAmount !== undefined) {
+      setPaymentPaidAmount(String(data.paymentPaidAmount));
+    }
+    setPaymentReportedAmount(
+      data.paymentReportedAmount !== undefined && data.paymentReportedAmount !== null
+        ? String(data.paymentReportedAmount)
+        : null
+    );
+    setPaymentReportedNote(
+      data.paymentReportedNote !== undefined && data.paymentReportedNote !== null
+        ? String(data.paymentReportedNote)
+        : null
+    );
+    setPaymentReportedAt(data.paymentReportedAt ?? null);
+    setPaymentReportedBy(data.paymentReportedBy ?? null);
+    setPaymentReportedAmountInput(
+      data.paymentReportedAmount !== undefined && data.paymentReportedAmount !== null
+        ? String(data.paymentReportedAmount)
+        : ""
+    );
+    setPaymentReportedNoteInput(
+      data.paymentReportedNote !== undefined && data.paymentReportedNote !== null
+        ? String(data.paymentReportedNote)
+        : ""
+    );
     if (data.sessionRole) {
       setSessionRole(data.sessionRole);
     }
@@ -224,6 +283,16 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
       ),
     [registrations]
   );
+  const paymentRateValue = parseMoneyInput(paymentRate) ?? 0;
+  const paymentPaidValue = parseMoneyInput(paymentPaidAmount) ?? 0;
+  const paymentTotal = paymentRateValue * totalPlayers;
+  const paymentPending = Math.max(0, paymentTotal - paymentPaidValue);
+  const paymentComplete = paymentPending <= 0.005;
+  const paymentDeltaValue = parseMoneyInput(paymentPaidDeltaInput);
+  const canRegisterPayment = paymentDeltaValue !== null && paymentDeltaValue > 0;
+  const paymentReportedValue = parseMoneyInput(paymentReportedAmountInput);
+  const canReportPayment =
+    paymentReportedValue !== null && paymentReportedValue > 0;
 
   const matchesByCategory = useMemo(() => {
     const map = new Map<string, Match[]>();
@@ -258,6 +327,11 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
   };
 
   const autoGroups = async (categoryId: string) => {
+    if (!paymentComplete) {
+      setPaymentPaidDeltaInput("");
+      setShowPaymentModal(true);
+      return;
+    }
     setAutoGroupingId(categoryId);
     setError(null);
     setMessage(null);
@@ -285,6 +359,11 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
   };
 
   const generateFixture = async (categoryId: string, regenerate: boolean) => {
+    if (!paymentComplete) {
+      setPaymentPaidDeltaInput("");
+      setShowPaymentModal(true);
+      return;
+    }
     const res = await fetch(`/api/tournaments/${tournamentId}/fixtures/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -301,7 +380,8 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
 
   const generateAllFixtures = async () => {
     if (groupActionCategories.length === 0) return;
-    if (tournamentStatus === "WAITING") {
+    if (!paymentComplete) {
+      setPaymentPaidDeltaInput("");
       setShowPaymentModal(true);
       return;
     }
@@ -355,6 +435,10 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
 
   const handleFinalizePayment = async () => {
     if (sessionRole !== "ADMIN") return;
+    if (!paymentComplete) {
+      setError("Aun hay saldo pendiente por pagar");
+      return;
+    }
     setUpdatingStatus(true);
     setError(null);
     setMessage(null);
@@ -377,8 +461,133 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
   };
 
   const handlePaymentReported = () => {
-    setShowPaymentModal(false);
-    setMessage("Pago reportado. Un administrador debe activar el torneo.");
+    const parsed = parseMoneyInput(paymentReportedAmountInput);
+    if (parsed === null || parsed <= 0) {
+      setError("Ingresa un monto valido");
+      return;
+    }
+    setSavingPaymentReport(true);
+    setError(null);
+    setMessage(null);
+    fetch(`/api/tournaments/${tournamentId}/payment-report`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        paymentReportedAmount: parsed,
+        paymentReportedNote: paymentReportedNoteInput,
+      }),
+    })
+      .then((res) =>
+        res
+          .json()
+          .catch(() => ({}))
+          .then((data) => ({ res, data }))
+      )
+      .then(({ res, data }) => {
+        if (!res.ok) {
+          const detail = data?.detail ? ` (${data.detail})` : "";
+          setError(`${data?.error ?? "No se pudo reportar el pago"}${detail}`);
+          return;
+        }
+        setPaymentReportedAmount(data?.tournament?.paymentReportedAmount ?? String(parsed));
+        setPaymentReportedNote(data?.tournament?.paymentReportedNote ?? null);
+        setPaymentReportedAt(data?.tournament?.paymentReportedAt ?? null);
+        setPaymentReportedBy(data?.tournament?.paymentReportedBy ?? null);
+        setShowPaymentModal(false);
+        setMessage("Pago reportado. Un administrador debe aprobarlo.");
+      })
+      .finally(() => setSavingPaymentReport(false));
+  };
+
+  const approvePaymentReport = async () => {
+    if (sessionRole !== "ADMIN") return;
+    setReviewingPaymentReport(true);
+    setError(null);
+    setMessage(null);
+    const res = await fetch(
+      `/api/tournaments/${tournamentId}/payment-report/approve`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      }
+    );
+    const data = await res.json().catch(() => ({}));
+    setReviewingPaymentReport(false);
+    if (!res.ok) {
+      const detail = data?.detail ? ` (${data.detail})` : "";
+      setError(`${data?.error ?? "No se pudo aprobar el reporte"}${detail}`);
+      return;
+    }
+    if (data?.tournament?.paymentPaidAmount !== undefined) {
+      setPaymentPaidAmount(String(data.tournament.paymentPaidAmount));
+    }
+    setPaymentReportedAmount(null);
+    setPaymentReportedNote(null);
+    setPaymentReportedAt(null);
+    setPaymentReportedBy(null);
+    setPaymentReportedAmountInput("");
+    setPaymentReportedNoteInput("");
+    setMessage("Pago reportado aprobado");
+  };
+
+  const rejectPaymentReport = async () => {
+    if (sessionRole !== "ADMIN") return;
+    setReviewingPaymentReport(true);
+    setError(null);
+    setMessage(null);
+    const res = await fetch(
+      `/api/tournaments/${tournamentId}/payment-report/reject`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      }
+    );
+    const data = await res.json().catch(() => ({}));
+    setReviewingPaymentReport(false);
+    if (!res.ok) {
+      const detail = data?.detail ? ` (${data.detail})` : "";
+      setError(`${data?.error ?? "No se pudo rechazar el reporte"}${detail}`);
+      return;
+    }
+    setPaymentReportedAmount(null);
+    setPaymentReportedNote(null);
+    setPaymentReportedAt(null);
+    setPaymentReportedBy(null);
+    setPaymentReportedAmountInput("");
+    setPaymentReportedNoteInput("");
+    setMessage("Reporte rechazado");
+  };
+
+  const handleRegisterPayment = async () => {
+    if (sessionRole !== "ADMIN") return;
+    if (!canRegisterPayment) {
+      setError("Ingresa un monto valido");
+      return;
+    }
+    setSavingPaymentPaid(true);
+    setError(null);
+    setMessage(null);
+    const res = await fetch(`/api/tournaments/${tournamentId}/payment`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ paymentPaidDelta: paymentDeltaValue }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setSavingPaymentPaid(false);
+    if (!res.ok) {
+      const detail = data?.detail ? ` (${data.detail})` : "";
+      setError(`${data?.error ?? "No se pudo registrar el pago"}${detail}`);
+      return;
+    }
+    if (data?.tournament?.paymentPaidAmount !== undefined) {
+      setPaymentPaidAmount(String(data.tournament.paymentPaidAmount));
+    }
+    setPaymentPaidDeltaInput("");
+    setMessage("Pago registrado");
   };
 
   const handleQualifiersChange = async (
@@ -564,10 +773,13 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
                   : "Publicar"}
               </button>
             </div>
-            {tournamentStatus === "WAITING" && (
+            {!paymentComplete && (
               <button
                 type="button"
-                onClick={() => setShowPaymentModal(true)}
+                onClick={() => {
+                  setPaymentPaidDeltaInput("");
+                  setShowPaymentModal(true);
+                }}
                 className="inline-flex items-center justify-center rounded-full border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 shadow-sm transition hover:border-amber-300"
               >
                 Ver pago
@@ -920,15 +1132,174 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
               <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
                 <p className="text-sm text-slate-600">Monto por jugador</p>
                 <p className="text-2xl font-semibold text-slate-900">
-                  {Number.parseFloat(paymentRate).toFixed(2)} Bs
+                  {paymentRateValue.toFixed(2)} Bs
                 </p>
               </div>
               <div className="rounded-2xl border border-emerald-200/80 bg-emerald-50/80 p-4">
                 <p className="text-sm text-emerald-700">Total a pagar</p>
                 <p className="text-2xl font-semibold text-emerald-900">
-                  {(Number.parseFloat(paymentRate) * totalPlayers).toFixed(2)} Bs
+                  {paymentTotal.toFixed(2)} Bs
                 </p>
               </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
+                  <p className="text-sm text-slate-600">Pagado</p>
+                  <p className="text-2xl font-semibold text-slate-900">
+                    {paymentPaidValue.toFixed(2)} Bs
+                  </p>
+                </div>
+                <div
+                  className={`rounded-2xl border p-4 ${
+                    paymentComplete
+                      ? "border-emerald-200/80 bg-emerald-50/80"
+                      : "border-amber-200/80 bg-amber-50/80"
+                  }`}
+                >
+                  <p
+                    className={`text-sm ${
+                      paymentComplete ? "text-emerald-700" : "text-amber-700"
+                    }`}
+                  >
+                    Saldo pendiente
+                  </p>
+                  <p
+                    className={`text-2xl font-semibold ${
+                      paymentComplete ? "text-emerald-900" : "text-amber-900"
+                    }`}
+                  >
+                    {paymentPending.toFixed(2)} Bs
+                  </p>
+                </div>
+              </div>
+              {sessionRole === "ADMIN" && (
+                <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-slate-700">
+                      Registrar pago
+                    </label>
+                    <input
+                      value={paymentPaidDeltaInput}
+                      onChange={(event) => setPaymentPaidDeltaInput(event.target.value)}
+                      className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                      placeholder="Ej. 50.00"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRegisterPayment}
+                    disabled={!canRegisterPayment || savingPaymentPaid}
+                    className="h-[42px] self-end rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {savingPaymentPaid ? "Registrando..." : "Agregar pago"}
+                  </button>
+                </div>
+              )}
+              {sessionRole === "ADMIN" && paymentReportedAmount && (
+                <div className="rounded-2xl border border-amber-200/80 bg-amber-50/80 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">
+                    Reporte pendiente
+                  </p>
+                  <div className="mt-2 grid gap-2 text-xs text-amber-900 sm:grid-cols-2">
+                    <div>
+                      <span className="font-semibold">Monto:</span>{" "}
+                      {paymentReportedAmount} Bs
+                    </div>
+                    <div>
+                      <span className="font-semibold">Reportado:</span>{" "}
+                      {paymentReportedAt
+                        ? new Date(paymentReportedAt).toISOString().split("T")[0]
+                        : "N/D"}
+                    </div>
+                    {paymentReportedBy && (
+                      <div className="sm:col-span-2">
+                        <span className="font-semibold">Usuario:</span>{" "}
+                        {paymentReportedBy.name ?? paymentReportedBy.email}
+                      </div>
+                    )}
+                    {paymentReportedNote && (
+                      <div className="sm:col-span-2">
+                        <span className="font-semibold">Nota:</span>{" "}
+                        {paymentReportedNote}
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={approvePaymentReport}
+                      disabled={reviewingPaymentReport}
+                      className="rounded-full bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      Aprobar reporte
+                    </button>
+                    <button
+                      type="button"
+                      onClick={rejectPaymentReport}
+                      disabled={reviewingPaymentReport}
+                      className="rounded-full border border-amber-300 bg-white px-4 py-1.5 text-xs font-semibold text-amber-700 shadow-sm transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      Rechazar
+                    </button>
+                  </div>
+                </div>
+              )}
+              {sessionRole !== "ADMIN" && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
+                    Reportar pago
+                  </p>
+                  <div className="mt-3 grid gap-3">
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-slate-700">
+                        Monto pagado
+                      </label>
+                      <input
+                        value={paymentReportedAmountInput}
+                        onChange={(event) =>
+                          setPaymentReportedAmountInput(event.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                        placeholder="Ej. 50.00"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium text-slate-700">
+                        Nota (opcional)
+                      </label>
+                      <input
+                        value={paymentReportedNoteInput}
+                        onChange={(event) =>
+                          setPaymentReportedNoteInput(event.target.value)
+                        }
+                        className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+                        placeholder="Ej. Transferencia del 03/02"
+                      />
+                    </div>
+                    {paymentReportedAmount && (
+                      <p className="text-xs text-amber-700">
+                        Ya existe un reporte pendiente. Si actualizas, se
+                        reemplazara el monto reportado.
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={handlePaymentReported}
+                      disabled={!canReportPayment || savingPaymentReport}
+                      className="rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {savingPaymentReport
+                        ? "Reportando..."
+                        : paymentReportedAmount
+                          ? "Actualizar reporte"
+                          : "Reportar pago"}
+                    </button>
+                  </div>
+                </div>
+              )}
+              <p className="text-xs text-slate-500">
+                Si agregas o eliminas jugadores luego, el saldo pendiente se
+                recalculara automaticamente.
+              </p>
               {paymentQrUrl && (
                 <div className="rounded-2xl border border-slate-200 bg-white p-4">
                   <p className="text-sm text-slate-600">QR de pago</p>
@@ -955,25 +1326,13 @@ export default function TournamentFixture({ tournamentId, tournamentName }: Prop
                   .
                 </p>
               )}
-              <p className="text-xs text-slate-500">
-                Al reportar el pago ya no podras agregar mas jugadores.
-              </p>
             </div>
             <div className="mt-6 flex items-center justify-end gap-2">
-              {sessionRole !== "ADMIN" && (
-                <button
-                  type="button"
-                  onClick={handlePaymentReported}
-                  className="rounded-full bg-indigo-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-indigo-700"
-                >
-                  Pago realizada
-                </button>
-              )}
               {sessionRole === "ADMIN" && (
                 <button
                   type="button"
                   onClick={handleFinalizePayment}
-                  disabled={updatingStatus}
+                  disabled={updatingStatus || !paymentComplete}
                   className="rounded-full bg-emerald-600 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {updatingStatus ? "Activando..." : "Pago finalizado"}

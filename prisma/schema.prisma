@@ -28,6 +28,7 @@ model User {
   createdCategories     Category[]             @relation("CategoryCreator")
   leaguePermissions     LeaguePermission[]
   tournamentPermissions TournamentPermission[]
+  paymentReports        Tournament[]           @relation("TournamentPaymentReport")
 }
 
 model Account {
@@ -161,6 +162,7 @@ model Sport {
   updatedAt   DateTime     @updatedAt
   tournaments Tournament[]
   categories  Category[]
+  leagues     League[]
 }
 
 model Tournament {
@@ -180,7 +182,17 @@ model Tournament {
   liveStreams          Json?
   playDays             Json?
   rankingEnabled       Boolean          @default(true)
+  countryCode          String?
+  countryName          String?
+  regionCode           String?
+  regionName           String?
+  cityName             String?
   paymentRate          Decimal          @default(0) @db.Decimal(10, 2)
+  paymentPaidAmount    Decimal          @default(0) @db.Decimal(10, 2)
+  paymentReportedAmount Decimal?        @db.Decimal(10, 2)
+  paymentReportedNote  String?          @db.Text
+  paymentReportedAt    DateTime?
+  paymentReportedById  String?
   schedulePublished    Boolean          @default(false)
   groupsPublished      Boolean          @default(false)
   playoffsPublished    Boolean          @default(false)
@@ -192,6 +204,7 @@ model Tournament {
   sport           Sport?                     @relation(fields: [sportId], references: [id])
   league          League?                    @relation(fields: [leagueId], references: [id])
   owner           User                       @relation("TournamentOwner", fields: [ownerId], references: [id])
+  paymentReportedBy User?                    @relation("TournamentPaymentReport", fields: [paymentReportedById], references: [id])
   clubs           TournamentClub[]
   categories      TournamentCategory[]
   registrations   TournamentRegistration[]
@@ -220,6 +233,7 @@ model TournamentClub {
   name         String
   address      String?
   courtsCount  Int      @default(1)
+  courtLabels  Json?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -512,6 +526,7 @@ model League {
   name        String          @unique
   description String?
   photoUrl    String?         @db.Text
+  sportId     String
   ownerId     String?
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
@@ -520,7 +535,10 @@ model League {
   rankings    PlayerRanking[]
 
   owner       User?              @relation("LeagueOwner", fields: [ownerId], references: [id])
+  sport       Sport              @relation(fields: [sportId], references: [id], onDelete: Restrict)
   permissions LeaguePermission[]
+
+  @@index([sportId])
 }
 
 model Season {

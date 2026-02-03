@@ -7,7 +7,10 @@ export const revalidate = 0;
 export default async function RankingsPage() {
   const [sports, leagues, seasons, categories, tournaments] = await Promise.all([
     prisma.sport.findMany({ orderBy: { name: "asc" } }),
-    prisma.league.findMany({ orderBy: { name: "asc" } }),
+    prisma.league.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, sportId: true, photoUrl: true },
+    }),
     prisma.season.findMany({ orderBy: [{ leagueId: "asc" }, { startDate: "desc" }] }),
     prisma.category.findMany({
       orderBy: [{ sport: { name: "asc" } }, { name: "asc" }],

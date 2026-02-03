@@ -12,6 +12,11 @@ type Tournament = {
   name: string;
   status: "WAITING" | "ACTIVE" | "FINISHED";
   paymentRate: string;
+  paymentPaidAmount?: string;
+  paymentReportedAmount?: string | null;
+  paymentReportedNote?: string | null;
+  paymentReportedAt?: string | Date | null;
+  paymentReportedBy?: { id: string; name: string | null; email: string } | null;
   rankingEnabled: boolean;
   league?: League | null;
   startDate: string | Date | null;
@@ -43,6 +48,7 @@ export default function TournamentStatusPanel({
     Record<string, "WAITING" | "ACTIVE" | "FINISHED">
   >({});
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [reportActionId, setReportActionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -143,6 +149,48 @@ export default function TournamentStatusPanel({
     } finally {
       setSavingId(null);
     }
+  };
+
+  const approveReport = async (tournamentId: string) => {
+    setReportActionId(tournamentId);
+    setError(null);
+    setMessage(null);
+    const res = await fetch(`/api/tournaments/${tournamentId}/payment-report/approve`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = data?.detail ? ` (${data.detail})` : "";
+      setError(`${data?.error ?? "No se pudo aprobar el reporte"}${detail}`);
+      setReportActionId(null);
+      return;
+    }
+    await refreshTournaments();
+    setMessage("Pago reportado aprobado");
+    setReportActionId(null);
+  };
+
+  const rejectReport = async (tournamentId: string) => {
+    setReportActionId(tournamentId);
+    setError(null);
+    setMessage(null);
+    const res = await fetch(`/api/tournaments/${tournamentId}/payment-report/reject`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const detail = data?.detail ? ` (${data.detail})` : "";
+      setError(`${data?.error ?? "No se pudo rechazar el reporte"}${detail}`);
+      setReportActionId(null);
+      return;
+    }
+    await refreshTournaments();
+    setMessage("Reporte de pago rechazado");
+    setReportActionId(null);
   };
 
   return (
@@ -279,6 +327,54 @@ export default function TournamentStatusPanel({
                     </button>
                   </div>
                 </div>
+                {tournament.paymentReportedAmount && (
+                  <div className="mt-3 rounded-2xl border border-amber-200/80 bg-amber-50/80 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">
+                      Reporte de pago pendiente
+                    </p>
+                    <div className="mt-2 grid gap-2 text-xs text-amber-800 sm:grid-cols-2">
+                      <div>
+                        <span className="font-semibold">Monto:</span>{" "}
+                        {tournament.paymentReportedAmount} Bs
+                      </div>
+                      <div>
+                        <span className="font-semibold">Reportado:</span>{" "}
+                        {toISODate(tournament.paymentReportedAt ?? null)}
+                      </div>
+                      {tournament.paymentReportedBy && (
+                        <div className="sm:col-span-2">
+                          <span className="font-semibold">Usuario:</span>{" "}
+                          {tournament.paymentReportedBy.name ??
+                            tournament.paymentReportedBy.email}
+                        </div>
+                      )}
+                      {tournament.paymentReportedNote && (
+                        <div className="sm:col-span-2">
+                          <span className="font-semibold">Nota:</span>{" "}
+                          {tournament.paymentReportedNote}
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => approveReport(tournament.id)}
+                        disabled={reportActionId === tournament.id}
+                        className="rounded-full bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        Aprobar reporte
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => rejectReport(tournament.id)}
+                        disabled={reportActionId === tournament.id}
+                        className="rounded-full border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-700 shadow-sm transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        Rechazar
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

@@ -185,9 +185,9 @@ export async function PATCH(
   if (!canManage) {
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
-  if (tournament.status === "ACTIVE" || tournament.status === "FINISHED") {
+  if (tournament.status === "FINISHED") {
     return NextResponse.json(
-      { error: "El torneo ya esta pagado y no permite cambios" },
+      { error: "El torneo ya esta finalizado y no permite cambios" },
       { status: 400 }
     );
   }
@@ -473,9 +473,9 @@ export async function DELETE(
   if (!canManage) {
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
-  if (tournament.status === "ACTIVE" || tournament.status === "FINISHED") {
+  if (tournament.status === "FINISHED") {
     return NextResponse.json(
-      { error: "El torneo ya esta pagado y no permite cambios" },
+      { error: "El torneo ya esta finalizado y no permite cambios" },
       { status: 400 }
     );
   }

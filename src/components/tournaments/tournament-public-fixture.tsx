@@ -164,6 +164,22 @@ const getTeamMembers = (registration?: Registration | null) => {
         .map((player) => playerLabel(player as Player));
 };
 
+const resolveMatchCourtLabel = (match: Match) => {
+    const courtNumber =
+        typeof match.courtNumber === "number"
+            ? match.courtNumber
+            : typeof match.courtNumber === "string" && /^\d+$/.test(match.courtNumber)
+                ? Number.parseInt(match.courtNumber, 10)
+                : null;
+    if (!courtNumber || courtNumber < 1) return "";
+    const labels = Array.isArray(match.club?.courtLabels) ? match.club?.courtLabels : [];
+    const label =
+        typeof labels[courtNumber - 1] === "string"
+            ? labels[courtNumber - 1].trim()
+            : "";
+    return label.length > 0 ? label : String(courtNumber);
+};
+
 const formatPlayoffRoundLabel = (bracketSize: number, roundNumber: number) => {
     const roundSize = Math.max(
         2,
@@ -219,10 +235,7 @@ export default function TournamentPublicFixture({
     const courtOptions = useMemo(() => {
         const set = new Set<string>();
         (Array.isArray(matches) ? matches : []).forEach((match) => {
-            const value =
-                typeof match.courtNumber === "number" || typeof match.courtNumber === "string"
-                    ? String(match.courtNumber)
-                    : "";
+            const value = resolveMatchCourtLabel(match);
             if (!value) return;
             set.add(value);
         });
@@ -251,7 +264,7 @@ export default function TournamentPublicFixture({
                     if (match.courtNumber !== null && match.courtNumber !== undefined) {
                         return false;
                     }
-                } else if (String(match.courtNumber ?? "") !== courtFilter) {
+                } else if (resolveMatchCourtLabel(match) !== courtFilter) {
                     return false;
                 }
             }
@@ -272,7 +285,9 @@ export default function TournamentPublicFixture({
                 match.groupName ?? "",
                 safePlayoffLabel,
                 match.startTime ?? "",
-                match.courtNumber ? `cancha ${match.courtNumber}` : "",
+                resolveMatchCourtLabel(match)
+                    ? `cancha ${resolveMatchCourtLabel(match)}`
+                    : "",
             ];
             const haystack = normalizeText(textParts.join(" "));
             return haystack.includes(query);
@@ -480,7 +495,9 @@ export default function TournamentPublicFixture({
                                                         {match.startTime ?? "N/D"}
                                                     </span>
                                                     <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">
-                                                        {match.courtNumber ? `Cancha ${match.courtNumber}` : "Cancha N/D"}
+                                                        {resolveMatchCourtLabel(match)
+                                                            ? `Cancha ${resolveMatchCourtLabel(match)}`
+                                                            : "Cancha N/D"}
                                                     </span>
                                                 </div>
                                                 <div className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-cyan-400">
@@ -628,7 +645,9 @@ export default function TournamentPublicFixture({
                                                         {match.startTime ?? "N/D"}
                                                     </td>
                                                     <td className="px-3 py-2">{match.club?.name ?? "N/D"}</td>
-                                                    <td className="px-3 py-2">{match.courtNumber ?? "-"}</td>
+                                                    <td className="px-3 py-2">
+                                                        {resolveMatchCourtLabel(match) || "-"}
+                                                    </td>
                                                     <td className="px-3 py-2">
                                                         {category?.abbreviation ?? "N/D"}
                                                     </td>

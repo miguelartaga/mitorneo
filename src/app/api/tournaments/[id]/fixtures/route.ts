@@ -77,6 +77,11 @@ export async function GET(
       playDays: true,
       status: true,
       paymentRate: true,
+      paymentPaidAmount: true,
+      paymentReportedAmount: true,
+      paymentReportedNote: true,
+      paymentReportedAt: true,
+      paymentReportedBy: { select: { id: true, name: true, email: true } },
       groupsPublished: true,
       playoffsPublished: true,
     },
@@ -161,7 +166,7 @@ export async function GET(
 
     const clubs = await tx.tournamentClub.findMany({
       where: { tournamentId },
-      select: { id: true, name: true, courtsCount: true },
+      select: { id: true, name: true, courtsCount: true, courtLabels: true },
       orderBy: { name: "asc" },
     });
 
@@ -259,6 +264,11 @@ export async function GET(
   return NextResponse.json({
     tournamentStatus: tournament.status,
     paymentRate: tournament.paymentRate.toString(),
+    paymentPaidAmount: tournament.paymentPaidAmount.toString(),
+    paymentReportedAmount: tournament.paymentReportedAmount?.toString() ?? null,
+    paymentReportedNote: tournament.paymentReportedNote ?? null,
+    paymentReportedAt: tournament.paymentReportedAt?.toISOString() ?? null,
+    paymentReportedBy: tournament.paymentReportedBy ?? null,
     groupsPublished: tournament.groupsPublished,
     playoffsPublished: tournament.playoffsPublished,
     sessionRole: session.user.role,

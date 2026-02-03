@@ -21,6 +21,18 @@ const buildGroupLabel = (index: number) => {
 const buildGroupLabels = (count: number) =>
   Array.from({ length: count }, (_, index) => buildGroupLabel(index));
 
+const countRegistrationPlayers = (registration: {
+  playerId?: string | null;
+  partnerId?: string | null;
+  partnerTwoId?: string | null;
+}) => {
+  let count = 0;
+  if (registration.playerId) count += 1;
+  if (registration.partnerId) count += 1;
+  if (registration.partnerTwoId) count += 1;
+  return count;
+};
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -41,7 +53,7 @@ export async function POST(
 
   const tournament = await prisma.tournament.findUnique({
     where: { id: tournamentId },
-    select: { id: true, ownerId: true, status: true },
+    select: { id: true, ownerId: true, status: true, paymentRate: true, paymentPaidAmount: true },
   });
 
   if (!tournament) {
@@ -88,6 +100,24 @@ export async function POST(
   ) {
     return NextResponse.json(
       { error: "La categoria no usa grupos" },
+      { status: 400 }
+    );
+  }
+
+  const paymentRegistrations = await prisma.tournamentRegistration.findMany({
+    where: { tournamentId },
+    select: { playerId: true, partnerId: true, partnerTwoId: true },
+  });
+  const playersCount = paymentRegistrations.reduce(
+    (sum, registration) => sum + countRegistrationPlayers(registration),
+    0
+  );
+  const rate = Number.parseFloat(String(tournament.paymentRate ?? 0));
+  const paid = Number.parseFloat(String(tournament.paymentPaidAmount ?? 0));
+  const total = rate * playersCount;
+  if (paid + 0.005 < total) {
+    return NextResponse.json(
+      { error: "Aun hay saldo pendiente por pagar" },
       { status: 400 }
     );
   }

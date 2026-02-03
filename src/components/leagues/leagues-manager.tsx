@@ -16,12 +16,15 @@ type League = {
   name: string;
   description: string | null;
   photoUrl?: string | null;
+  sportId: string;
+  sport?: { id: string; name: string } | null;
   ownerId?: string | null;
   canEdit?: boolean;
   seasons: Season[];
 };
 
 type Props = {
+  sports: { id: string; name: string }[];
   initialLeagues: League[];
   currentUserId: string;
   isAdmin: boolean;
@@ -33,7 +36,12 @@ const toISODate = (value: string | Date) => {
   return parsed.toISOString().split("T")[0];
 };
 
-export default function LeaguesManager({ initialLeagues, currentUserId, isAdmin }: Props) {
+export default function LeaguesManager({
+  sports,
+  initialLeagues,
+  currentUserId,
+  isAdmin,
+}: Props) {
   const [leagues, setLeagues] = useState<League[]>(initialLeagues);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -54,6 +62,7 @@ export default function LeaguesManager({ initialLeagues, currentUserId, isAdmin 
     name: "",
     description: "",
     photoUrl: "",
+    sportId: sports[0]?.id ?? "",
   });
   const [seasonForm, setSeasonForm] = useState({
     leagueId: initialLeagues[0]?.id ?? "",
@@ -73,7 +82,12 @@ export default function LeaguesManager({ initialLeagues, currentUserId, isAdmin 
       setLeagues(data.leagues);
       if (editingId && !data.leagues.some((league: League) => league.id === editingId)) {
         setEditingId(null);
-        setLeagueForm({ name: "", description: "", photoUrl: "" });
+        setLeagueForm({
+          name: "",
+          description: "",
+          photoUrl: "",
+          sportId: sports[0]?.id ?? "",
+        });
       }
       const hasLeague = data.leagues.length > 0;
       const leagueExists = data.leagues.some(
@@ -101,6 +115,7 @@ export default function LeaguesManager({ initialLeagues, currentUserId, isAdmin 
         name: leagueForm.name,
         description: leagueForm.description || null,
         photoUrl: leagueForm.photoUrl || null,
+        sportId: leagueForm.sportId,
       }),
     });
 
@@ -115,7 +130,12 @@ export default function LeaguesManager({ initialLeagues, currentUserId, isAdmin 
     }
 
     await refreshLeagues();
-    setLeagueForm({ name: "", description: "", photoUrl: "" });
+    setLeagueForm({
+      name: "",
+      description: "",
+      photoUrl: "",
+      sportId: sports[0]?.id ?? "",
+    });
     setEditingId(null);
     setMessage(editingId ? "Liga actualizada" : "Liga creada");
   };
@@ -153,6 +173,7 @@ export default function LeaguesManager({ initialLeagues, currentUserId, isAdmin 
       name: league.name,
       description: league.description ?? "",
       photoUrl: league.photoUrl ?? "",
+      sportId: league.sportId,
     });
     setMessage("Editando liga");
     setError(null);
@@ -160,7 +181,12 @@ export default function LeaguesManager({ initialLeagues, currentUserId, isAdmin 
 
   const cancelEditing = () => {
     setEditingId(null);
-    setLeagueForm({ name: "", description: "", photoUrl: "" });
+    setLeagueForm({
+      name: "",
+      description: "",
+      photoUrl: "",
+      sportId: sports[0]?.id ?? "",
+    });
     setMessage(null);
     setError(null);
   };
@@ -332,6 +358,28 @@ export default function LeaguesManager({ initialLeagues, currentUserId, isAdmin 
 
         <div className="mt-6 grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
+            <label className="text-sm font-medium text-slate-700">Deporte</label>
+            <select
+              value={leagueForm.sportId}
+              onChange={(e) =>
+                setLeagueForm((prev) => ({ ...prev, sportId: e.target.value }))
+              }
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200"
+            >
+              <option value="">Selecciona deporte</option>
+              {sports.map((sport) => (
+                <option key={sport.id} value={sport.id}>
+                  {sport.name}
+                </option>
+              ))}
+            </select>
+            {sports.length === 0 && (
+              <p className="text-xs text-slate-500">
+                Primero crea un deporte para poder continuar.
+              </p>
+            )}
+          </div>
+          <div className="space-y-2">
             <label className="text-sm font-medium text-slate-700">Nombre</label>
             <input
               value={leagueForm.name}
@@ -405,7 +453,11 @@ export default function LeaguesManager({ initialLeagues, currentUserId, isAdmin 
           <button
             type="button"
             onClick={handleSaveLeague}
-            disabled={loading || leagueForm.name.trim().length < 2}
+            disabled={
+              loading ||
+              leagueForm.name.trim().length < 2 ||
+              leagueForm.sportId.trim().length === 0
+            }
             className="inline-flex items-center justify-center rounded-full bg-indigo-600 px-6 py-3 text-sm font-semibold text-white shadow-[0_18px_40px_-22px_rgba(79,70,229,0.5)] transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-70"
           >
             {loading ? "Guardando..." : editingId ? "Guardar cambios" : "Crear liga"}
@@ -523,6 +575,9 @@ export default function LeaguesManager({ initialLeagues, currentUserId, isAdmin 
                     </div>
                     <div>
                       <p className="text-sm font-semibold text-slate-900">{league.name}</p>
+                      {league.sport?.name && (
+                        <p className="text-xs text-slate-500">{league.sport.name}</p>
+                      )}
                       {league.description && (
                         <p className="text-xs text-slate-600">{league.description}</p>
                       )}

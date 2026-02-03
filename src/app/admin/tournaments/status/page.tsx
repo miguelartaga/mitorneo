@@ -19,6 +19,7 @@ export default async function TournamentStatusPage() {
     include: {
       league: { select: { id: true, name: true } },
       clubs: true,
+      paymentReportedBy: { select: { id: true, name: true, email: true } },
       categories: {
         include: {
           category: {
@@ -50,6 +51,17 @@ export default async function TournamentStatusPage() {
     rankingEnabled: tournament.rankingEnabled,
     status: tournament.status,
     paymentRate: tournament.paymentRate.toString(),
+    paymentPaidAmount: tournament.paymentPaidAmount.toString(),
+    paymentReportedAmount: tournament.paymentReportedAmount?.toString() ?? null,
+    paymentReportedNote: tournament.paymentReportedNote ?? null,
+    paymentReportedAt: toISOStringOrNull(tournament.paymentReportedAt),
+    paymentReportedBy: tournament.paymentReportedBy
+      ? {
+          id: tournament.paymentReportedBy.id,
+          name: tournament.paymentReportedBy.name,
+          email: tournament.paymentReportedBy.email,
+        }
+      : null,
     leagueId: tournament.leagueId,
     league: tournament.league,
     startDate: toISOStringOrNull(tournament.startDate),

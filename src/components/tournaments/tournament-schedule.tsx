@@ -61,6 +61,7 @@ type Club = {
   id: string;
   name: string;
   courtsCount: number;
+  courtLabels?: string[] | null;
 };
 
 type ScheduleEntry = {
@@ -141,6 +142,19 @@ const formatTeamName = (registration?: Registration) => {
     return playersLabel ? `${teamName} (${playersLabel})` : teamName;
   }
   return playersLabel || "N/D";
+};
+
+const resolveCourtLabel = (
+  club: Club | undefined,
+  courtNumber: number | null | undefined
+) => {
+  if (!club || !courtNumber || courtNumber < 1) return null;
+  const labels = Array.isArray(club.courtLabels) ? club.courtLabels : [];
+  const label =
+    typeof labels[courtNumber - 1] === "string"
+      ? labels[courtNumber - 1].trim()
+      : "";
+  return label.length > 0 ? label : String(courtNumber);
 };
 
 const buildRegistrationSearchText = (registration?: Registration | null) => {
@@ -1045,13 +1059,20 @@ const renderTeamDisplay = (
   }, [scheduleDays, activeScheduleDay]);
 
   const courts = useMemo(() => {
-    const list: { clubId: string; clubName: string; courtNumber: number }[] = [];
+    const list: {
+      clubId: string;
+      clubName: string;
+      courtNumber: number;
+      courtLabel: string;
+    }[] = [];
     clubs.forEach((club) => {
       for (let index = 1; index <= club.courtsCount; index += 1) {
+        const label = resolveCourtLabel(club, index) ?? String(index);
         list.push({
           clubId: club.id,
           clubName: club.name,
           courtNumber: index,
+          courtLabel: label,
         });
       }
     });
@@ -1152,6 +1173,7 @@ const renderTeamDisplay = (
         clubId: string;
         clubName: string;
         courtNumber: number;
+        courtLabel: string;
       }[]
     >();
     scheduleDays.forEach((day) => {
@@ -1165,6 +1187,7 @@ const renderTeamDisplay = (
           clubId: court.clubId,
           clubName: court.clubName,
           courtNumber: court.courtNumber,
+          courtLabel: court.courtLabel,
         }))
       );
       map.set(day, daySlots);
@@ -2199,7 +2222,7 @@ const renderTeamDisplay = (
                                     {slot.clubName}
                                   </td>
                                   <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
-                                    {slot.courtNumber}
+                                    {slot.courtLabel}
                                   </td>
                                   <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
                                     {match ? (

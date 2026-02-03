@@ -59,12 +59,20 @@ const pickSportFallbackPhoto = (sportName?: string | null) => {
 export default async function TournamentsPage({
     searchParams,
 }: {
-    searchParams: Promise<{ q?: string; status?: string; sport?: string }>;
+    searchParams: Promise<{
+        q?: string;
+        status?: string;
+        sport?: string;
+        country?: string;
+        region?: string;
+    }>;
 }) {
-    const { q, status, sport } = await searchParams;
+    const { q, status, sport, country, region } = await searchParams;
     const query = q || "";
     const statusFilter = status || "all";
     const sportFilter = sport || "all";
+    const countryFilter = country || "all";
+    const regionFilter = region || "all";
 
     const sports = await prisma.sport.findMany({
         orderBy: { name: "asc" },
@@ -75,6 +83,8 @@ export default async function TournamentsPage({
         where: {
             ...(query ? { name: { contains: query } } : {}),
             ...(sportFilter !== "all" ? { sportId: sportFilter } : {}),
+            ...(countryFilter !== "all" ? { countryName: countryFilter } : {}),
+            ...(regionFilter !== "all" ? { regionName: regionFilter } : {}),
         },
         include: {
             sport: true,
@@ -93,13 +103,46 @@ export default async function TournamentsPage({
         return true;
     });
 
-    const buildHref = (next: { status?: string | null; sport?: string | null }) => {
+    const countries = Array.from(
+        new Set(
+            tournaments
+                .map((tournament) => tournament.countryName)
+                .filter((value): value is string => Boolean(value && value.trim()))
+        )
+    ).sort((a, b) => a.localeCompare(b));
+
+    const regions = Array.from(
+        new Set(
+            tournaments
+                .filter((tournament) =>
+                    countryFilter === "all"
+                        ? Boolean(tournament.regionName)
+                        : tournament.countryName === countryFilter
+                )
+                .map((tournament) => tournament.regionName)
+                .filter((value): value is string => Boolean(value && value.trim()))
+        )
+    ).sort((a, b) => a.localeCompare(b));
+
+    const resolveNext = <T,>(value: T | null | undefined, current: T) =>
+        value === undefined ? current : value;
+
+    const buildHref = (next: {
+        status?: string | null;
+        sport?: string | null;
+        country?: string | null;
+        region?: string | null;
+    }) => {
         const params = new URLSearchParams();
         if (query) params.set("q", query);
-        const nextStatus = next.status ?? statusFilter;
-        const nextSport = next.sport ?? sportFilter;
+        const nextStatus = resolveNext(next.status, statusFilter);
+        const nextSport = resolveNext(next.sport, sportFilter);
+        const nextCountry = resolveNext(next.country, countryFilter);
+        const nextRegion = resolveNext(next.region, regionFilter);
         if (nextStatus && nextStatus !== "all") params.set("status", nextStatus);
         if (nextSport && nextSport !== "all") params.set("sport", nextSport);
+        if (nextCountry && nextCountry !== "all") params.set("country", nextCountry);
+        if (nextRegion && nextRegion !== "all") params.set("region", nextRegion);
         const qs = params.toString();
         return qs ? `/tournaments?${qs}` : "/tournaments";
     };
@@ -118,7 +161,7 @@ export default async function TournamentsPage({
                     <SearchInput placeholder="Buscar por nombre..." />
                 </div>
 
-                <div className="mb-10 flex flex-col gap-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                <div className="mb-10 flex flex-col gap-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                     <div className="flex flex-wrap items-center gap-2 text-sm">
                         <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
                             Estado
@@ -169,6 +212,64 @@ export default async function TournamentsPage({
                                         }`}
                                 >
                                     {item.name}
+                                </Link>
+                            );
+                        })}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                            Pais
+                        </span>
+                        <Link
+                            href={buildHref({ country: null, region: null })}
+                            className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${countryFilter === "all"
+                                ? "border-slate-900 bg-slate-900 text-white"
+                                : "border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:text-indigo-600"
+                                }`}
+                        >
+                            Todos
+                        </Link>
+                        {countries.map((item) => {
+                            const isActive = countryFilter === item;
+                            return (
+                                <Link
+                                    key={item}
+                                    href={buildHref({ country: item, region: null })}
+                                    className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${isActive
+                                        ? "border-slate-900 bg-slate-900 text-white"
+                                        : "border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:text-indigo-600"
+                                        }`}
+                                >
+                                    {item}
+                                </Link>
+                            );
+                        })}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                            Departamento
+                        </span>
+                        <Link
+                            href={buildHref({ region: null })}
+                            className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${regionFilter === "all"
+                                ? "border-slate-900 bg-slate-900 text-white"
+                                : "border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:text-indigo-600"
+                                }`}
+                        >
+                            Todos
+                        </Link>
+                        {regions.map((item) => {
+                            const isActive = regionFilter === item;
+                            return (
+                                <Link
+                                    key={item}
+                                    href={buildHref({ region: item })}
+                                    className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] transition ${isActive
+                                        ? "border-slate-900 bg-slate-900 text-white"
+                                        : "border-slate-200 bg-white text-slate-600 hover:border-indigo-200 hover:text-indigo-600"
+                                        }`}
+                                >
+                                    {item}
                                 </Link>
                             );
                         })}
@@ -233,7 +334,13 @@ export default async function TournamentsPage({
                                                 <div className="flex items-center gap-2">
                                                     <MapPin className="h-4 w-4 text-indigo-500" />
                                                     <span className="line-clamp-1">
-                                                        {tournament.clubs[0].name}
+                                                        {[
+                                                            tournament.regionName,
+                                                            tournament.countryName,
+                                                        ]
+                                                            .filter(Boolean)
+                                                            .join(", ") ||
+                                                            tournament.clubs[0].name}
                                                     </span>
                                                 </div>
                                             )}

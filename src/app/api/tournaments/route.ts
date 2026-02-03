@@ -7,6 +7,7 @@ type ClubInput = {
   name?: unknown;
   address?: unknown;
   courtsCount?: unknown;
+  courtLabels?: unknown;
 };
 
 type CategoryEntryInput = {
@@ -85,9 +86,30 @@ const parseCourtsCount = (value: unknown) => {
   return parsed;
 };
 
+const normalizeCourtLabels = (value: unknown, courtsCount: number) => {
+  if (value === null || value === undefined) return { labels: null as string[] | null };
+  if (!Array.isArray(value)) return { error: "Nombres de canchas invalidos" };
+  if (value.length > courtsCount) {
+    return { error: "Nombres de canchas invalidos" };
+  }
+  const normalized = value.map((entry) =>
+    typeof entry === "string" ? entry.trim() : ""
+  );
+  while (normalized.length < courtsCount) {
+    normalized.push("");
+  }
+  const hasAny = normalized.some((label) => label.length > 0);
+  return { labels: hasAny ? normalized : null };
+};
+
 const normalizeClubs = (value: unknown) => {
   const list = Array.isArray(value) ? (value as ClubInput[]) : [];
-  const normalized: { name: string; address: string; courtsCount: number }[] = [];
+  const normalized: {
+    name: string;
+    address: string;
+    courtsCount: number;
+    courtLabels: string[] | null;
+  }[] = [];
 
   for (const club of list) {
     const name = typeof club.name === "string" ? club.name.trim() : "";
@@ -101,10 +123,16 @@ const normalizeClubs = (value: unknown) => {
     if (courtsProvided && parsedCourts === null) {
       return { error: "Cantidad de canchas invalida" };
     }
+    const resolvedCourts = parsedCourts ?? 1;
+    const labelsResult = normalizeCourtLabels(club.courtLabels, resolvedCourts);
+    if (labelsResult.error) {
+      return { error: labelsResult.error };
+    }
     normalized.push({
       name,
       address,
-      courtsCount: parsedCourts ?? 1,
+      courtsCount: resolvedCourts,
+      courtLabels: labelsResult.labels,
     });
   }
 
@@ -227,6 +255,7 @@ const normalizeSponsorEntries = (value: unknown) => {
 const tournamentInclude = {
   league: { select: { id: true, name: true } },
   clubs: true,
+  paymentReportedBy: { select: { id: true, name: true, email: true } },
   sponsors: {
     orderBy: { sortOrder: "asc" },
   },
@@ -480,7 +509,7 @@ export async function POST(request: Request) {
 
     const league = await prisma.league.findUnique({
       where: { id: leagueId.trim() },
-      select: { id: true, ownerId: true },
+      select: { id: true, ownerId: true, sportId: true },
     });
 
     if (!league) {
@@ -491,6 +520,12 @@ export async function POST(request: Request) {
     if (!canManage) {
       return NextResponse.json({ error: "No autorizado" }, { status: 403 });
     }
+    if (league.sportId !== sport.id) {
+      return NextResponse.json(
+        { error: "La liga debe pertenecer al deporte seleccionado" },
+        { status: 400 }
+      );
+    }
 
     leagueIdValue = league.id;
   }
@@ -498,6 +533,31 @@ export async function POST(request: Request) {
   const addressValue =
     typeof address === "string" && address.trim().length > 0
       ? address.trim()
+      : null;
+  const countryCodeValue =
+    typeof (body as { countryCode?: unknown }).countryCode === "string" &&
+    (body as { countryCode: string }).countryCode.trim().length > 0
+      ? (body as { countryCode: string }).countryCode.trim()
+      : null;
+  const countryNameValue =
+    typeof (body as { countryName?: unknown }).countryName === "string" &&
+    (body as { countryName: string }).countryName.trim().length > 0
+      ? (body as { countryName: string }).countryName.trim()
+      : null;
+  const regionCodeValue =
+    typeof (body as { regionCode?: unknown }).regionCode === "string" &&
+    (body as { regionCode: string }).regionCode.trim().length > 0
+      ? (body as { regionCode: string }).regionCode.trim()
+      : null;
+  const regionNameValue =
+    typeof (body as { regionName?: unknown }).regionName === "string" &&
+    (body as { regionName: string }).regionName.trim().length > 0
+      ? (body as { regionName: string }).regionName.trim()
+      : null;
+  const cityNameValue =
+    typeof (body as { cityName?: unknown }).cityName === "string" &&
+    (body as { cityName: string }).cityName.trim().length > 0
+      ? (body as { cityName: string }).cityName.trim()
       : null;
   const rulesValue =
     typeof rulesText === "string" && rulesText.trim().length > 0
@@ -546,6 +606,11 @@ export async function POST(request: Request) {
         sportId: sport.id,
         leagueId: leagueIdValue,
         address: addressValue,
+        countryCode: countryCodeValue,
+        countryName: countryNameValue,
+        regionCode: regionCodeValue,
+        regionName: regionNameValue,
+        cityName: cityNameValue,
         rankingEnabled: rankingEnabledValue,
         paymentRate: settings.paymentRateDefault,
         startDate: start,
@@ -563,6 +628,7 @@ export async function POST(request: Request) {
             name: club.name,
             address: club.address.length > 0 ? club.address : null,
             courtsCount: club.courtsCount,
+            courtLabels: club.courtLabels,
           })),
         },
         categories: {

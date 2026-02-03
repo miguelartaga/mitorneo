@@ -154,8 +154,7 @@ export default function TournamentRegistrations({
   const categoriesById = useMemo(() => {
     return new Map(categories.map((category) => [category.id, category]));
   }, [categories]);
-  const registrationsLocked =
-    tournamentStatus === "ACTIVE" || tournamentStatus === "FINISHED";
+  const registrationsLocked = tournamentStatus === "FINISHED";
 
   const createEntry = (categoryId: string, amountPaid?: string) => {
     const entryId = `entry-${entryCounter.current}`;
@@ -426,7 +425,7 @@ export default function TournamentRegistrations({
     setMessage(null);
     const wasEditing = Boolean(editingRegistrationId);
     if (registrationsLocked) {
-      setError("El torneo ya esta pagado y no permite mas inscripciones.");
+      setError("El torneo ya esta finalizado y no permite mas inscripciones.");
       return;
     }
 
@@ -973,7 +972,7 @@ export default function TournamentRegistrations({
           <div className="mt-4 space-y-4">
             {registrationsLocked && (
               <div className="rounded-2xl border border-amber-200/70 bg-amber-50/80 px-4 py-3 text-sm text-amber-700">
-                El torneo esta pagado. Ya no puedes agregar, editar o eliminar
+                El torneo esta finalizado. Ya no puedes agregar, editar o eliminar
                 inscripciones.
               </div>
             )}

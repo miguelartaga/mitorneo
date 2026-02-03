@@ -10,6 +10,7 @@ export type Club = {
     name: string;
     address?: string | null;
     courtsCount?: number | null;
+    courtLabels?: string[] | null;
 };
 
 export type Category = {
@@ -63,7 +64,7 @@ export type Match = {
     createdAt?: string | null;
     scheduledDate?: string | null;
     startTime?: string | null;
-    courtNumber?: number | null;
+    courtNumber?: number | string | null;
     club?: Club | null;
     games?: unknown;
     liveState?: {

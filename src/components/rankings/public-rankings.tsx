@@ -12,6 +12,8 @@ type Sport = {
 type League = {
   id: string;
   name: string;
+  sportId: string;
+  photoUrl?: string | null;
 };
 
 type Season = {
@@ -79,6 +81,23 @@ const formatTournamentDate = (value: string | null) => {
   }).format(date);
 };
 
+const normalizeSportName = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/[^\w]/g, "");
+
+const getSportImage = (sportName: string) => {
+  const name = normalizeSportName(sportName);
+  if (/padel|pdel/.test(name)) return "/sports/padel/1.jpg";
+  if (/tenis|tennis/.test(name)) return "/sports/tenis/1.jpg";
+  if (/fronton/.test(name)) return "/sports/fronton/1.jpg";
+  if (/raquet|racquet|racket/.test(name)) return "/sports/raquet/1.jpg";
+  if (/squash/.test(name)) return "/sports/squash/1.jpg";
+  return "/sports/raquet/1.jpg";
+};
+
 export default function PublicRankings({
   sports,
   leagues,
@@ -95,10 +114,10 @@ export default function PublicRankings({
   const [loading, setLoading] = useState(false);
   const [entries, setEntries] = useState<RankingEntry[]>([]);
 
-  useEffect(() => {
-    if (leagueId || leagues.length === 0) return;
-    setLeagueId(leagues[0].id);
-  }, [leagueId, leagues]);
+  const filteredLeagues = useMemo(() => {
+    if (!sportId) return leagues;
+    return leagues.filter((league) => league.sportId === sportId);
+  }, [leagues, sportId]);
 
   const filteredSeasons = useMemo(() => {
     if (!leagueId) return seasons;
@@ -121,7 +140,14 @@ export default function PublicRankings({
     return list;
   }, [tournaments, sportId, leagueId]);
 
+  const canShowResults = Boolean(sportId && leagueId && seasonId);
+
   useEffect(() => {
+    if (!canShowResults) {
+      setEntries([]);
+      setLoading(false);
+      return;
+    }
     const controller = new AbortController();
     let active = true;
     const loadRankings = async () => {
@@ -162,115 +188,190 @@ export default function PublicRankings({
       active = false;
       controller.abort();
     };
-  }, [sportId, leagueId, seasonId, categoryId, tournamentId, query]);
+  }, [sportId, leagueId, seasonId, categoryId, tournamentId, query, canShowResults]);
 
   return (
     <section className="rounded-[28px] border border-slate-200 bg-white p-3 shadow-sm sm:p-6">
-      <div className="flex flex-wrap items-center gap-2">
-        {leagues.map((league) => (
-          <button
-            key={league.id}
-            type="button"
-            onClick={() => {
-              setLeagueId(league.id);
-              setSeasonId("");
-              setTournamentId("");
-            }}
-            className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] transition ${leagueId === league.id
-              ? "bg-slate-900 text-white"
-              : "border border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-[0.25em] text-indigo-500/80">
+          Selecciona deporte
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {sports.map((sport) => (
+            <button
+              key={sport.id}
+              type="button"
+              onClick={() => {
+                setSportId(sport.id);
+                setLeagueId("");
+                setSeasonId("");
+                setCategoryId("");
+                setTournamentId("");
+                setQuery("");
+              }}
+              className={`group relative overflow-hidden rounded-2xl border px-4 py-4 text-left shadow-sm transition ${
+                sportId === sport.id
+                  ? "border-indigo-400/70 bg-indigo-50/70"
+                  : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
               }`}
-          >
-            {league.name}
-          </button>
-        ))}
+            >
+              <div className="absolute -right-12 -top-12 h-24 w-24 rounded-full bg-indigo-200/40 blur-2xl" />
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-12 overflow-hidden rounded-2xl bg-slate-100 ring-1 ring-slate-200">
+                  <img
+                    src={getSportImage(sport.name)}
+                    alt={`Foto ${sport.name}`}
+                    className="h-full w-full object-cover"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">
+                    Deporte
+                  </p>
+                  <h3 className="mt-1 text-lg font-semibold text-slate-900">
+                    {sport.name}
+                  </h3>
+                </div>
+              </div>
+              <p className="mt-3 text-xs text-slate-500">
+                Ver ligas y temporadas disponibles.
+              </p>
+            </button>
+          ))}
+        </div>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-        <label className="space-y-2 text-sm font-semibold text-slate-700">
-          Deporte
-          <select
-            value={sportId}
-            onChange={(event) => {
-              setSportId(event.target.value);
-              setCategoryId("");
-              setTournamentId("");
-            }}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm"
-          >
-            <option value="">Todos</option>
-            {sports.map((sport) => (
-              <option key={sport.id} value={sport.id}>
-                {sport.name}
-              </option>
-            ))}
-          </select>
-        </label>
+      {sportId && (
+        <div className="mt-8">
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">
+            Ligas
+          </p>
+          {filteredLeagues.length === 0 ? (
+            <p className="mt-2 text-sm text-slate-500">
+              No hay ligas para este deporte.
+            </p>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {filteredLeagues.map((league) => (
+                <button
+                  key={league.id}
+                  type="button"
+                  onClick={() => {
+                    setLeagueId(league.id);
+                    setSeasonId("");
+                    setTournamentId("");
+                  }}
+                  className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] transition ${
+                    leagueId === league.id
+                      ? "bg-slate-900 text-white"
+                      : "border border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                  }`}
+                >
+                  <span className="h-6 w-6 overflow-hidden rounded-full bg-slate-100 ring-1 ring-slate-200">
+                    {league.photoUrl ? (
+                      <img
+                        src={league.photoUrl}
+                        alt={`Logo ${league.name}`}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <span className="flex h-full w-full items-center justify-center text-[9px] font-bold text-slate-400">
+                        {league.name.slice(0, 1).toUpperCase()}
+                      </span>
+                    )}
+                  </span>
+                  <span>{league.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
-        <label className="space-y-2 text-sm font-semibold text-slate-700">
-          Temporada
-          <select
-            value={seasonId}
-            onChange={(event) => setSeasonId(event.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm"
-          >
-            <option value="">Todas</option>
-            {filteredSeasons.map((season) => (
-              <option key={season.id} value={season.id}>
-                {formatSeasonLabel(season)}
-              </option>
-            ))}
-          </select>
-        </label>
+      {leagueId && (
+        <div className="mt-8">
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] text-slate-500">
+            Temporadas
+          </p>
+          {filteredSeasons.length === 0 ? (
+            <p className="mt-2 text-sm text-slate-500">
+              No hay temporadas disponibles para esta liga.
+            </p>
+          ) : (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {filteredSeasons.map((season) => (
+                <button
+                  key={season.id}
+                  type="button"
+                  onClick={() => setSeasonId(season.id)}
+                  className={`rounded-full px-4 py-1.5 text-xs font-semibold uppercase tracking-[0.2em] transition ${
+                    seasonId === season.id
+                      ? "bg-indigo-600 text-white"
+                      : "border border-slate-200 bg-white text-slate-600 hover:border-slate-300"
+                  }`}
+                >
+                  {formatSeasonLabel(season)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
-        <label className="space-y-2 text-sm font-semibold text-slate-700">
-          Categoria
-          <select
-            value={categoryId}
-            onChange={(event) => setCategoryId(event.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm"
-          >
-            <option value="">Todas</option>
-            {filteredCategories.map((category) => (
-              <option key={category.id} value={category.id}>
-                {category.name}
-              </option>
-            ))}
-          </select>
-        </label>
+      {canShowResults && (
+        <div className="mt-8 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <label className="space-y-2 text-sm font-semibold text-slate-700">
+            Categoria
+            <select
+              value={categoryId}
+              onChange={(event) => setCategoryId(event.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm"
+            >
+              <option value="">Todas</option>
+              {filteredCategories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <label className="space-y-2 text-sm font-semibold text-slate-700">
-          Torneo
-          <select
-            value={tournamentId}
-            onChange={(event) => setTournamentId(event.target.value)}
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm"
-          >
-            <option value="">Todos</option>
-            {filteredTournaments.map((tournament) => (
-              <option key={tournament.id} value={tournament.id}>
-                {tournament.name}
-                {tournament.startDate
-                  ? ` · ${formatTournamentDate(tournament.startDate)}`
-                  : ""}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label className="space-y-2 text-sm font-semibold text-slate-700">
+            Torneo
+            <select
+              value={tournamentId}
+              onChange={(event) => setTournamentId(event.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm"
+            >
+              <option value="">Todos</option>
+              {filteredTournaments.map((tournament) => (
+                <option key={tournament.id} value={tournament.id}>
+                  {tournament.name}
+                  {tournament.startDate
+                    ? ` - ${formatTournamentDate(tournament.startDate)}`
+                    : ""}
+                </option>
+              ))}
+            </select>
+          </label>
 
-        <label className="space-y-2 text-sm font-semibold text-slate-700">
-          Buscar jugador
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Nombre, ciudad o pais"
-            className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm"
-          />
-        </label>
-      </div>
-
+          <label className="space-y-2 text-sm font-semibold text-slate-700">
+            Buscar jugador
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Nombre, ciudad o pais"
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-900 shadow-sm"
+            />
+          </label>
+        </div>
+      )}
       <div className="mt-8">
-        {loading ? (
+        {!canShowResults ? (
+          <p className="text-sm text-slate-500">
+            Selecciona un deporte, una liga y una temporada para ver el ranking.
+          </p>
+        ) : loading ? (
           <p className="text-sm text-slate-500">Cargando rankings...</p>
         ) : entries.length === 0 ? (
           <p className="text-sm text-slate-500">
@@ -306,13 +407,13 @@ export default function PublicRankings({
                     </Link>
                   </div>
                   <p className="truncate text-xs text-slate-500 sm:text-sm">
-                    {entry.player.city || "Ciudad"} · {entry.player.country || "Pais"}
+                    {entry.player.city || "Ciudad"} - {entry.player.country || "Pais"}
                   </p>
                   <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[9px] font-semibold uppercase tracking-wider text-slate-500 sm:mt-2 sm:gap-x-2 sm:gap-y-1 sm:text-[10px]">
                     <span className="truncate max-w-[80px] sm:max-w-none">{entry.category.abbreviation}</span>
-                    <span>·</span>
+                    <span>-</span>
                     <span className="truncate max-w-[120px] sm:max-w-none">{entry.league.name}</span>
-                    <span>·</span>
+                    <span>-</span>
                     <span className="truncate max-w-[60px] sm:max-w-none">{entry.season.name}</span>
                   </div>
                 </div>

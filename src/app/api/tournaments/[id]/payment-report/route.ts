@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getServerSession } from "@/lib/auth";
+import { canManageTournament } from "@/lib/permissions";
 import { NextResponse } from "next/server";
 
 const resolveId = async (
@@ -37,7 +38,10 @@ export async function PATCH(
 ) {
   const resolvedParams = await params;
   const session = await getServerSession();
-  if (!session?.user || session.user.role !== "ADMIN") {
+  if (
+    !session?.user ||
+    (session.user.role !== "ADMIN" && session.user.role !== "TOURNAMENT_ADMIN")
+  ) {
     return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
 
@@ -47,67 +51,62 @@ export async function PATCH(
   }
 
   const body = await request.json().catch(() => ({}));
-  const rate = parseRate((body as { paymentRate?: unknown }).paymentRate);
-  const paidAmount = parseRate(
-    (body as { paymentPaidAmount?: unknown }).paymentPaidAmount
+  const reportedAmount = parseRate(
+    (body as { paymentReportedAmount?: unknown }).paymentReportedAmount
   );
-  const paidDelta = parseRate(
-    (body as { paymentPaidDelta?: unknown }).paymentPaidDelta
-  );
+  const rawNote =
+    typeof (body as { paymentReportedNote?: unknown }).paymentReportedNote ===
+    "string"
+      ? (body as { paymentReportedNote: string }).paymentReportedNote.trim()
+      : "";
+  const paymentReportedNote = rawNote.length > 0 ? rawNote : null;
 
-  if (rate === null && paidAmount === null && paidDelta === null) {
+  if (reportedAmount === null || reportedAmount <= 0) {
     return NextResponse.json({ error: "Monto invalido" }, { status: 400 });
   }
-  if (rate !== null && rate < 0) {
-    return NextResponse.json({ error: "Monto invalido" }, { status: 400 });
-  }
-  if (paidAmount !== null && paidAmount < 0) {
-    return NextResponse.json({ error: "Monto pagado invalido" }, { status: 400 });
-  }
-  if (paidDelta !== null && paidDelta <= 0) {
-    return NextResponse.json({ error: "Monto pagado invalido" }, { status: 400 });
-  }
-  if (paidAmount !== null && paidDelta !== null) {
-    return NextResponse.json(
-      { error: "Solo se permite un tipo de ajuste de pago" },
-      { status: 400 }
-    );
-  }
 
-  const existing = await prisma.tournament.findUnique({
+  const tournament = await prisma.tournament.findUnique({
     where: { id: tournamentId },
-    select: { id: true, status: true },
+    select: { id: true, ownerId: true },
   });
 
-  if (!existing) {
+  if (!tournament) {
     return NextResponse.json({ error: "Torneo no encontrado" }, { status: 404 });
   }
 
-  if (existing.status === "FINISHED") {
-    return NextResponse.json(
-      { error: "El torneo ya esta finalizado" },
-      { status: 400 }
-    );
+  const canManage = await canManageTournament(
+    session.user,
+    tournamentId,
+    tournament.ownerId
+  );
+  if (!canManage) {
+    return NextResponse.json({ error: "No autorizado" }, { status: 403 });
   }
 
-  const data: { paymentRate?: number; paymentPaidAmount?: number } = {};
-  if (rate !== null) data.paymentRate = rate;
-  if (paidAmount !== null) data.paymentPaidAmount = paidAmount;
-
-  const tournament = await prisma.tournament.update({
+  const updated = await prisma.tournament.update({
     where: { id: tournamentId },
-    data:
-      paidDelta !== null
-        ? { ...data, paymentPaidAmount: { increment: paidDelta } }
-        : data,
-    select: { id: true, paymentRate: true, paymentPaidAmount: true },
+    data: {
+      paymentReportedAmount: reportedAmount,
+      paymentReportedNote,
+      paymentReportedAt: new Date(),
+      paymentReportedById: session.user.id,
+    },
+    select: {
+      id: true,
+      paymentReportedAmount: true,
+      paymentReportedNote: true,
+      paymentReportedAt: true,
+      paymentReportedBy: { select: { id: true, name: true, email: true } },
+    },
   });
 
   return NextResponse.json({
     tournament: {
-      id: tournament.id,
-      paymentRate: tournament.paymentRate.toString(),
-      paymentPaidAmount: tournament.paymentPaidAmount.toString(),
+      id: updated.id,
+      paymentReportedAmount: updated.paymentReportedAmount?.toString() ?? null,
+      paymentReportedNote: updated.paymentReportedNote ?? null,
+      paymentReportedAt: updated.paymentReportedAt?.toISOString() ?? null,
+      paymentReportedBy: updated.paymentReportedBy ?? null,
     },
   });
 }

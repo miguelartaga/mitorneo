@@ -223,6 +223,19 @@ const formatPrintDate = (value: string) => {
   } del ${date.getFullYear()}`;
 };
 
+const resolveCourtLabel = (
+  club: { courtLabels?: unknown } | undefined,
+  courtNumber?: number | null
+) => {
+  if (!club || !courtNumber || courtNumber < 1) return "-";
+  const labels = Array.isArray(club.courtLabels) ? club.courtLabels : [];
+  const label =
+    typeof labels[courtNumber - 1] === "string"
+      ? labels[courtNumber - 1].trim()
+      : "";
+  return label.length > 0 ? label : String(courtNumber);
+};
+
 const resolveId = async (
   request: Request,
   params?: { id?: string } | Promise<{ id?: string }>
@@ -359,7 +372,7 @@ export async function GET(
 
   const clubs = await prisma.tournamentClub.findMany({
     where: { tournamentId },
-    select: { id: true, name: true },
+    select: { id: true, name: true, courtLabels: true },
   });
 
   const matches = await prisma.tournamentMatch.findMany({
@@ -398,7 +411,7 @@ export async function GET(
   const registrationMap = new Map(
     registrations.map((registration) => [registration.id, registration])
   );
-  const clubMap = new Map(clubs.map((club) => [club.id, club.name]));
+  const clubMap = new Map(clubs.map((club) => [club.id, club]));
   const qualifiersByGroup = new Map(
     qualifiers.map((entry) => [
       `${entry.categoryId}:${(entry.groupName || "A").trim() || "A"}`,
@@ -608,8 +621,8 @@ export async function GET(
       if (a.startTime !== b.startTime) {
         return (a.startTime ?? "").localeCompare(b.startTime ?? "");
       }
-      const clubA = clubMap.get(a.clubId ?? "") ?? "";
-      const clubB = clubMap.get(b.clubId ?? "") ?? "";
+      const clubA = clubMap.get(a.clubId ?? "")?.name ?? "";
+      const clubB = clubMap.get(b.clubId ?? "")?.name ?? "";
       if (clubA !== clubB) return clubA.localeCompare(clubB);
       return (a.courtNumber ?? 0) - (b.courtNumber ?? 0);
     });
@@ -784,10 +797,11 @@ export async function GET(
                 { fronton: isFronton }
               )
             : teamBLabel ?? "Por definir";
+          const club = clubMap.get(match.clubId ?? "");
           const row = [
             match.startTime ?? "",
-            clubMap.get(match.clubId ?? "") ?? "-",
-            match.courtNumber ? String(match.courtNumber) : "-",
+            club?.name ?? "-",
+            resolveCourtLabel(club, match.courtNumber ?? null),
             category?.abbreviation ?? "N/D",
             groupLabel,
             teamA,

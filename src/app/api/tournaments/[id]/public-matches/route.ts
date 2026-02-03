@@ -72,7 +72,7 @@ export async function GET(
         },
       },
       club: {
-        select: { id: true, name: true },
+        select: { id: true, name: true, courtLabels: true },
       },
       courtNumber: true,
     },

@@ -52,10 +52,16 @@ export async function PATCH(
 
   const body = await request.json().catch(() => ({}));
   const { name } = body as { name?: unknown };
+  const sportId = (body as { sportId?: unknown }).sportId;
   const description = normalizeOptionalText((body as { description?: unknown }).description);
   const photoUrl = normalizeOptionalText((body as { photoUrl?: unknown }).photoUrl);
 
-  const data: { name?: string; description?: string | null; photoUrl?: string | null } = {};
+  const data: {
+    name?: string;
+    description?: string | null;
+    photoUrl?: string | null;
+    sportId?: string;
+  } = {};
 
   if (name !== undefined) {
     if (typeof name !== "string" || name.trim().length < 2) {
@@ -76,6 +82,20 @@ export async function PATCH(
       return NextResponse.json({ error: "Foto invalida" }, { status: 400 });
     }
     data.photoUrl = (photoUrl as { value?: string | null }).value ?? null;
+  }
+
+  if (sportId !== undefined) {
+    if (typeof sportId !== "string" || !sportId.trim()) {
+      return NextResponse.json({ error: "Deporte requerido" }, { status: 400 });
+    }
+    const sport = await prisma.sport.findUnique({
+      where: { id: sportId.trim() },
+      select: { id: true },
+    });
+    if (!sport) {
+      return NextResponse.json({ error: "Deporte no encontrado" }, { status: 404 });
+    }
+    data.sportId = sport.id;
   }
 
   if (Object.keys(data).length === 0) {

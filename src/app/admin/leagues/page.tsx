@@ -41,9 +41,15 @@ export default async function LeaguesAdminPage() {
           },
     orderBy: { name: "asc" },
     include: {
+      sport: { select: { id: true, name: true } },
       seasons: { orderBy: { startDate: "desc" } },
       ...includePermissions,
     },
+  });
+
+  const sports = await prisma.sport.findMany({
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
   });
 
   const formattedLeagues = leagues.map((league) => ({
@@ -90,6 +96,7 @@ export default async function LeaguesAdminPage() {
           </p>
           <div className="mt-10">
             <LeaguesManager
+              sports={sports}
               initialLeagues={formattedLeagues}
               currentUserId={session.user.id}
               isAdmin={isAdmin}

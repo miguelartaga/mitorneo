@@ -78,7 +78,15 @@ export default async function TournamentPublicPage({
       matches: {
         orderBy: [{ scheduledDate: "asc" }, { startTime: "asc" }],
         include: {
-          club: { select: { id: true, name: true, address: true, courtsCount: true } },
+          club: {
+            select: {
+              id: true,
+              name: true,
+              address: true,
+              courtsCount: true,
+              courtLabels: true,
+            },
+          },
           category: {
             select: { id: true, name: true, abbreviation: true },
           },

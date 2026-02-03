@@ -53,6 +53,7 @@ export default async function TournamentsAdminPage() {
     include: {
       league: { select: { id: true, name: true } },
       clubs: true,
+      paymentReportedBy: { select: { id: true, name: true, email: true } },
       sponsors: { orderBy: { sortOrder: "asc" } },
       categories: {
         include: {
@@ -89,7 +90,7 @@ export default async function TournamentsAdminPage() {
   const leagues = await prisma.league.findMany({
     where: leagueWhere,
     orderBy: { name: "asc" },
-    select: { id: true, name: true },
+    select: { id: true, name: true, sportId: true },
   });
 
   const serializedTournaments = tournaments.map((tournament) => ({
@@ -97,6 +98,11 @@ export default async function TournamentsAdminPage() {
     name: tournament.name,
     sportId: tournament.sportId,
     address: tournament.address,
+    countryCode: tournament.countryCode,
+    countryName: tournament.countryName,
+    regionCode: tournament.regionCode,
+    regionName: tournament.regionName,
+    cityName: tournament.cityName,
     photoUrl: tournament.photoUrl,
     liveStreamTitle: tournament.liveStreamTitle,
     liveStreamUrl: tournament.liveStreamUrl,
@@ -104,6 +110,20 @@ export default async function TournamentsAdminPage() {
     rankingEnabled: tournament.rankingEnabled,
     status: tournament.status,
     paymentRate: tournament.paymentRate.toString(),
+    paymentPaidAmount:
+      tournament.paymentPaidAmount !== undefined && tournament.paymentPaidAmount !== null
+        ? tournament.paymentPaidAmount.toString()
+        : "0",
+    paymentReportedAmount: tournament.paymentReportedAmount?.toString() ?? null,
+    paymentReportedNote: tournament.paymentReportedNote ?? null,
+    paymentReportedAt: toISOStringOrNull(tournament.paymentReportedAt),
+    paymentReportedBy: tournament.paymentReportedBy
+      ? {
+          id: tournament.paymentReportedBy.id,
+          name: tournament.paymentReportedBy.name,
+          email: tournament.paymentReportedBy.email,
+        }
+      : null,
     leagueId: tournament.leagueId,
     league: tournament.league,
     ownerId: tournament.ownerId,
